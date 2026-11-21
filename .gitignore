@@ -1,0 +1,16 @@
+# 依賴與快取
+__pycache__/
+*.py[cod]
+*$py.class
+node_modules/
+
+# 本地暫存與測試預覽截圖
+backup_pre_blackbox/
+fix_previews/
+scratch/
+*.log
+
+# 系統檔案
+.DS_Store
+Thumbs.db
+desktop.ini

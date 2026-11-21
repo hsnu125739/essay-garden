@@ -1,0 +1,411 @@
+{
+  "themes": {
+    "flowerbed": {
+      "id": "flowerbed",
+      "name": "春櫻花圃",
+      "desc": "嫩綠草坡與水窪，四周環繞木柵欄，彩蝶隨花瓣翩翩飛舞"
+    },
+    "forest": {
+      "id": "forest",
+      "name": "迷霧森林",
+      "desc": "深綠苔蘚與青苔奇石，林間灑落斜射光束，小狐狸與松鼠偶爾探頭"
+    },
+    "oasis": {
+      "id": "oasis",
+      "name": "沙漠綠洲",
+      "desc": "暖金沙丘環抱清澈綠洲水池，夕陽星塵下有小駱駝緩步經過"
+    }
+  },
+  "species": [
+    {
+      "id": "fb_c1",
+      "name": "紫薰衣草",
+      "theme": "flowerbed",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "fb_c2",
+      "name": "白雛菊叢",
+      "theme": "flowerbed",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "fb_c3",
+      "name": "暖陽向日葵",
+      "theme": "flowerbed",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fb_c4",
+      "name": "粉鬱金香",
+      "theme": "flowerbed",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fb_c5",
+      "name": "藍風信子",
+      "theme": "flowerbed",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fb_r1",
+      "name": "緋紅玫瑰叢",
+      "theme": "flowerbed",
+      "rarity": "rare",
+      "requiredDays": 2
+    },
+    {
+      "id": "fb_r2",
+      "name": "晨露繡球花",
+      "theme": "flowerbed",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fb_r3",
+      "name": "香檳山茶花",
+      "theme": "flowerbed",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fb_r4",
+      "name": "紫藤花架",
+      "theme": "flowerbed",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fb_e1",
+      "name": "黃金桂花樹",
+      "theme": "flowerbed",
+      "rarity": "epic",
+      "requiredDays": 3
+    },
+    {
+      "id": "fb_e2",
+      "name": "霓虹藍花楹",
+      "theme": "flowerbed",
+      "rarity": "epic",
+      "requiredDays": 4
+    },
+    {
+      "id": "fb_l1",
+      "name": "千本櫻神木",
+      "theme": "flowerbed",
+      "rarity": "legendary",
+      "requiredDays": 5
+    },
+    {
+      "id": "fo_c1",
+      "name": "翠玉蕨叢",
+      "theme": "forest",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "fo_c2",
+      "name": "紅傘小蘑菇",
+      "theme": "forest",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "fo_c3",
+      "name": "青苔橡木苗",
+      "theme": "forest",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fo_c4",
+      "name": "白樺幼樹",
+      "theme": "forest",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fo_c5",
+      "name": "森之鈴蘭",
+      "theme": "forest",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "fo_r1",
+      "name": "星光螢菇",
+      "theme": "forest",
+      "rarity": "rare",
+      "requiredDays": 2
+    },
+    {
+      "id": "fo_r2",
+      "name": "秋霞紅楓樹",
+      "theme": "forest",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fo_r3",
+      "name": "金扇銀杏樹",
+      "theme": "forest",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fo_r4",
+      "name": "幽谷翠竹",
+      "theme": "forest",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "fo_e1",
+      "name": "蒼翠盆景古松",
+      "theme": "forest",
+      "rarity": "epic",
+      "requiredDays": 3
+    },
+    {
+      "id": "fo_e2",
+      "name": "幻紫靈芝叢",
+      "theme": "forest",
+      "rarity": "epic",
+      "requiredDays": 4
+    },
+    {
+      "id": "fo_l1",
+      "name": "螢火世界樹",
+      "theme": "forest",
+      "rarity": "legendary",
+      "requiredDays": 5
+    },
+    {
+      "id": "oa_c1",
+      "name": "玉露多肉",
+      "theme": "oasis",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "oa_c2",
+      "name": "沙漠蘆薈",
+      "theme": "oasis",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "oa_c3",
+      "name": "團扇仙人掌",
+      "theme": "oasis",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "oa_c4",
+      "name": "石蓮花座",
+      "theme": "oasis",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "oa_c5",
+      "name": "沙洲蘆葦叢",
+      "theme": "oasis",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "oa_r1",
+      "name": "金冠仙人掌",
+      "theme": "oasis",
+      "rarity": "rare",
+      "requiredDays": 2
+    },
+    {
+      "id": "oa_r2",
+      "name": "沙漠玫瑰木",
+      "theme": "oasis",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "oa_r3",
+      "name": "綠洲睡蓮",
+      "theme": "oasis",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "oa_r4",
+      "name": "龍血小樹",
+      "theme": "oasis",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "oa_e1",
+      "name": "綠洲椰棗樹",
+      "theme": "oasis",
+      "rarity": "epic",
+      "requiredDays": 3
+    },
+    {
+      "id": "oa_e2",
+      "name": "猴麵包巨木",
+      "theme": "oasis",
+      "rarity": "epic",
+      "requiredDays": 4
+    },
+    {
+      "id": "oa_l1",
+      "name": "海市蜃樓神木",
+      "theme": "oasis",
+      "rarity": "legendary",
+      "requiredDays": 5
+    },
+    {
+      "id": "cm_c1",
+      "name": "幸運四葉草",
+      "theme": "common",
+      "rarity": "common",
+      "requiredDays": 1
+    },
+    {
+      "id": "cm_c2",
+      "name": "甜美草莓叢",
+      "theme": "common",
+      "rarity": "common",
+      "requiredDays": 2
+    },
+    {
+      "id": "cm_r1",
+      "name": "陽光小柑橘",
+      "theme": "common",
+      "rarity": "rare",
+      "requiredDays": 2
+    },
+    {
+      "id": "cm_r2",
+      "name": "藍莓果樹叢",
+      "theme": "common",
+      "rarity": "rare",
+      "requiredDays": 3
+    },
+    {
+      "id": "cm_e1",
+      "name": "月光銀樺樹",
+      "theme": "common",
+      "rarity": "epic",
+      "requiredDays": 4
+    },
+    {
+      "id": "cm_l1",
+      "name": "彩虹祈願樹",
+      "theme": "common",
+      "rarity": "legendary",
+      "requiredDays": 5
+    },
+    {
+      "id": "lim_7",
+      "name": "七日初心盆栽",
+      "theme": "limited",
+      "rarity": "legendary",
+      "requiredDays": 1,
+      "milestone": 7
+    },
+    {
+      "id": "lim_30",
+      "name": "滿月桂冠神木",
+      "theme": "limited",
+      "rarity": "legendary",
+      "requiredDays": 1,
+      "milestone": 30
+    },
+    {
+      "id": "lim_100",
+      "name": "百日星河櫻",
+      "theme": "limited",
+      "rarity": "legendary",
+      "requiredDays": 1,
+      "milestone": 100
+    },
+    {
+      "id": "lim_365",
+      "name": "永恆時光古松",
+      "theme": "limited",
+      "rarity": "legendary",
+      "requiredDays": 1,
+      "milestone": 365
+    }
+  ],
+  "decor": [
+    {
+      "id": "dec_lantern",
+      "name": "青苔石燈籠",
+      "cost": 30
+    },
+    {
+      "id": "dec_bench",
+      "name": "暖木小長椅",
+      "cost": 50
+    },
+    {
+      "id": "dec_pond",
+      "name": "竹筧流泉缽",
+      "cost": 80
+    },
+    {
+      "id": "dec_rock",
+      "name": "山水景觀石",
+      "cost": 40
+    },
+    {
+      "id": "dec_torii",
+      "name": "朱紅小鳥居",
+      "cost": 120
+    },
+    {
+      "id": "dec_arch",
+      "name": "繁花拱門架",
+      "cost": 200
+    }
+  ],
+  "bgThemes": [
+    {
+      "id": "morning",
+      "name": "晴空白雲",
+      "cost": 0,
+      "desc": "高斯常態分佈高度與負反饋生成，近景雲朵緩緩掠過花園島上方。"
+    },
+    {
+      "id": "sunset",
+      "name": "黃昏暮霞",
+      "cost": 50,
+      "desc": "吉卜力金邊晚霞、暖光暮日呼吸與深邃漸層天幕。"
+    },
+    {
+      "id": "night",
+      "name": "靜謐星河",
+      "cost": 60,
+      "desc": "漫天動態隨機重生純亮十字星，向左下方劃落的 -36° 璀璨流星雨。"
+    },
+    {
+      "id": "rain",
+      "name": "雨後彩虹",
+      "cost": 80,
+      "desc": "16° 自然微斜舒緩細雨，停雨時 140° 深邃幾何彩虹由左至右展開。"
+    },
+    {
+      "id": "bubbles",
+      "name": "夢幻泡泡",
+      "cost": 80,
+      "desc": "前後景深立體分層穿梭，晶瑩通透薄膜與彩色莫蘭迪新月光斑。"
+    }
+  ]
+}

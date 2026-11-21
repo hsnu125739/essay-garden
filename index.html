@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>隨筆花園 Essay Garden</title>
+  <link rel="manifest" href="./manifest.json" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --bg-sky-top: #bce3da;
+      --bg-sky-mid: #d6efe7;
+      --bg-sky-bot: #eef7f0;
+      --surface-cream: #fffdf8;
+      --surface-oat: #f6f0e4;
+      --border-warm: #e5dec9;
+      --forest-deep: #1d4237;
+      --forest-primary: #2b5e4e;
+      --forest-sage: #628b78;
+      --text-cocoa: #382e26;
+      --text-muted: #786b5e;
+      --accent-amber: #df8a2b;
+    }
+    body {
+      background: linear-gradient(180deg, #b8e2d9 0%, #d8f0e8 48%, #eef7f1 100%);
+      color: var(--text-cocoa);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Microsoft JhengHei", sans-serif;
+      touch-action: manipulation;
+    }
+    body[data-theme="forest"] {
+      background: linear-gradient(180deg, #9ec9bc 0%, #c4e0d5 48%, #e2f0e9 100%);
+    }
+    body[data-theme="oasis"] {
+      background: linear-gradient(180deg, #eed7b4 0%, #f7e9d1 50%, #fcf6ea 100%);
+    }
+    @keyframes float-island {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-5px); }
+    }
+    @keyframes float-card {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-3px); }
+    }
+    @keyframes cloud-drift {
+      0%, 100% { transform: translateX(0px); }
+      50% { transform: translateX(10px); }
+    }
+    @keyframes bokeh-drift {
+      0%, 100% { opacity: 0.28; transform: translateY(0px) scale(1); }
+      50% { opacity: 0.65; transform: translateY(-10px) scale(1.12); }
+    }
+    @keyframes pulse-ring {
+      0%, 100% { opacity: 0.45; transform: scale(0.96); }
+      50% { opacity: 0.95; transform: scale(1.05); }
+    }
+    .island-float { animation: float-island 5.5s ease-in-out infinite; }
+    .card-float { animation: float-card 6.5s ease-in-out infinite; }
+    .card-float:hover, .card-float:active { animation-play-state: paused; }
+    .cloud-drift { animation: cloud-drift 14s ease-in-out infinite; }
+    .bokeh-dot { animation: bokeh-drift 6s ease-in-out infinite; }
+    .slot-pulse { animation: pulse-ring 2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+    @keyframes react-pop {
+      0% { transform: scale(1); }
+      45% { transform: scale(1.32); }
+      100% { transform: scale(1); }
+    }
+    @keyframes tray-in {
+      0% { opacity: 0; transform: translateY(8px) scale(0.92); }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .react-pop { animation: react-pop 280ms cubic-bezier(0.22, 1, 0.36, 1); }
+    .reaction-tray-in { animation: tray-in 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+    @keyframes screen-fade-out {
+      from { opacity: 1; }
+      to { opacity: 0; }
+    }
+    @keyframes screen-fade-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes essay-row-fly-in {
+      from { transform: translateX(calc(100% + 48px)); }
+      to { transform: translateX(0); }
+    }
+    .home-fade-out {
+      animation: screen-fade-out 220ms ease-out forwards;
+      pointer-events: none;
+    }
+    .essays-header-in {
+      animation: screen-fade-in 260ms ease-out both;
+    }
+    .essay-row-fly-in {
+      animation: essay-row-fly-in 680ms cubic-bezier(0.16, 1, 0.3, 1) both;
+      animation-delay: var(--row-delay, 0ms);
+    }
+    [data-react-btn] {
+      touch-action: none;
+      -webkit-touch-callout: none;
+      user-select: none;
+    }
+    .reaction-opt {
+      transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), background-color 140ms ease;
+    }
+    .reaction-opt[data-hovered="true"] {
+      transform: translateY(-7px) scale(1.42);
+    }
+    .reaction-opt [data-opt-label] {
+      opacity: 0;
+      transform: translate(-50%, 3px);
+      transition: opacity 120ms ease, transform 120ms ease;
+    }
+    .reaction-opt[data-hovered="true"] [data-opt-label] {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .island-float, .card-float, .cloud-drift, .bokeh-dot, .slot-pulse, .react-pop, .reaction-tray-in, .home-fade-out, .essays-header-in, .essay-row-fly-in { animation: none; }
+    }
+    .cozy-card {
+      background: var(--surface-cream);
+      border: 1.5px solid var(--border-warm);
+      box-shadow: 0 6px 20px -4px rgba(56, 46, 38, 0.08);
+    }
+    .cozy-pill {
+      background: rgba(255, 253, 248, 0.88);
+      border: 1.5px solid var(--border-warm);
+      box-shadow: 0 4px 12px rgba(29, 66, 55, 0.07);
+    }
+    .sky-card {
+      background: rgba(255, 253, 248, 0.84);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1.5px solid rgba(255, 255, 255, 0.78);
+      box-shadow: 0 10px 24px -8px rgba(29, 66, 55, 0.14), 0 2px 6px -2px rgba(56, 46, 38, 0.06);
+    }
+    .sky-pill {
+      background: rgba(255, 253, 248, 0.72);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border: 1.5px solid rgba(255, 255, 255, 0.72);
+      box-shadow: 0 4px 14px -2px rgba(29, 66, 55, 0.08);
+    }
+    .memo-note {
+      position: relative;
+      overflow: hidden;
+      border-radius: 14px;
+      background-color: var(--memo-bg, #fbf0e0);
+      box-shadow: 0 10px 22px -8px rgba(29, 66, 55, 0.18), 0 2px 6px -2px rgba(56, 46, 38, 0.08);
+    }
+    .memo-note::before,
+    .memo-note::after {
+      content: "";
+      position: absolute;
+      left: -1px;
+      right: -1px;
+      background-image: var(--memo-img);
+      background-size: 100% auto;
+      background-repeat: no-repeat;
+      pointer-events: none;
+    }
+    .memo-note::before {
+      top: -1px;
+      aspect-ratio: 455 / 126;
+      background-position: top center;
+    }
+    .memo-note::after {
+      bottom: -1px;
+      aspect-ratio: 455 / 72;
+      background-position: bottom center;
+    }
+    .memo-note > * {
+      position: relative;
+      z-index: 1;
+    }
+    .memo-text {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 5;
+      overflow: hidden;
+    }
+    @media (min-height: 760px) {
+      .memo-text { -webkit-line-clamp: 7; }
+    }
+    .memo-text-compact {
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+      overflow: hidden;
+    }
+    @media (min-height: 760px) {
+      .memo-text-compact { -webkit-line-clamp: 4; }
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .essay-scroll-row, .essay-scroll-row * {
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-user-drag: none;
+    }
+    .essay-scroll-row.is-dragging, .essay-scroll-row.is-dragging .essay-card {
+      cursor: grabbing;
+    }
+    #full-garden-viewport svg { touch-action: none; }
+  </style>
+</head>
+<body class="min-h-screen antialiased select-none flex justify-center">
+  <!-- 手機直式主容器（內含柔和動態天候與背景） -->
+  <div id="app-container" class="w-full max-w-md min-h-screen flex flex-col relative overflow-hidden transition-all duration-700 bg-theme-morning">
+
+    <!-- 後景動態層（小島與卡片背後，z-0） -->
+    <div id="dynamic-bg-layer" class="pointer-events-none absolute inset-0 overflow-hidden" style="z-index: 0;"></div>
+
+    <!-- 前景動態層（蓋過花園島，z-index: 25 !important，pointer-events: none 絕不干擾小島操作） -->
+    <div id="dynamic-fg-layer" class="pointer-events-none absolute inset-0 overflow-hidden" style="z-index: 25;"></div>
+
+    <!-- 頂部優先事件提示條 -->
+    <button id="priority-banner" class="hidden z-20 w-full bg-[#df8a2b] text-white text-xs font-semibold px-4 py-2.5 text-left shadow-sm transition hover:brightness-105"></button>
+
+    <!-- Toast 訊息 -->
+    <div id="toast-bar" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#1d4237]/95 text-[#fffdf8] text-xs font-medium px-4 py-2.5 rounded-full shadow-lg border border-white/15"></div>
+
+    <!-- 長按浮出反應選擇托盤（fixed 定位避免被卡片 overflow:hidden 裁切） -->
+    <div id="reaction-tray" class="hidden fixed z-50 px-1.5 py-1 rounded-full bg-[#fffdf8]/95 backdrop-blur-md border border-[#e5dec9] shadow-xl flex items-center justify-between select-none" role="menu" aria-label="選擇心情反應"></div>
+
+    <!-- ==================== 首頁（連續天空場景：上方浮動隨筆，下方延伸至底的 3D 懸浮花園島 + 懸浮資訊膠囊） ==================== -->
+    <main id="screen-home" class="relative flex-1 flex flex-col px-4 pt-3 pb-0">
+      <!-- 上半部天空群組：精簡標題與狀態列、單列撰寫欄、天空浮動隨筆輪播（z-30 確保高於前景雲朵 z-25，不遮蔽卡片） -->
+      <section class="relative z-30 space-y-2.5">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 shrink-0">
+            <div class="w-7 h-7 rounded-xl bg-[#2b5e4e] text-[#fffdf8] flex items-center justify-center shadow-sm" id="brand-logo-icon"></div>
+            <h1 class="text-base font-extrabold text-[#1d4237] tracking-tight leading-tight whitespace-nowrap">隨筆花園</h1>
+          </div>
+          <div class="flex items-center gap-1.5 min-w-0">
+            <div class="sky-pill rounded-full px-2.5 py-1 flex items-center gap-2 text-xs font-bold whitespace-nowrap">
+              <div id="home-stat-streak" class="flex items-center gap-1 text-[#c87119]"></div>
+              <div class="w-px h-3 bg-[#e5dec9]"></div>
+              <div id="home-stat-energy" class="flex items-center gap-1 text-[#2b5e4e]"></div>
+              <div class="w-px h-3 bg-[#e5dec9]"></div>
+              <div id="home-stat-bag" class="flex items-center gap-1 text-[#4a6b5d]"></div>
+            </div>
+            <button type="button" data-open-modal="settings" id="btn-home-settings" title="設定與測試" aria-label="設定與測試" class="sky-pill w-8 h-8 rounded-full text-[#382e26] flex items-center justify-center hover:bg-white transition shrink-0"></button>
+          </div>
+        </div>
+
+        <!-- 單列撰寫提示欄（仿 FB 發文列，點擊開啟寫作彈窗） -->
+        <button type="button" id="btn-write-composer" class="w-full sky-card rounded-2xl px-2.5 py-2 flex items-center gap-2 text-left hover:border-[#2b5e4e]/45 active:scale-[0.99] transition"></button>
+
+        <!-- 橫向滑動輪播：由新到舊排列浮動隨筆便條（最多 10 則） -->
+        <div id="essay-carousel" class="essay-scroll-row relative z-30 flex items-stretch gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 py-2 cursor-grab"></div>
+      </section>
+
+      <!-- 下半部：延伸至底部的無邊框 3D 懸浮花園島 + 懸浮於底部的月份與佈置資訊膠囊 -->
+      <section class="relative flex-1 min-h-[250px] -mx-4 flex items-center justify-center">
+        <button id="home-prev-month" title="上一個月份花園" class="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 text-[#1d4237] drop-shadow-[0_2px_5px_rgba(255,255,255,0.95)] hover:scale-110 active:scale-95 disabled:opacity-20 disabled:pointer-events-none transition"></button>
+
+        <div id="home-garden-card" class="w-full h-full flex items-center justify-center cursor-pointer relative z-10">
+          <svg id="home-island-svg" viewBox="-215 -208 430 450" class="w-full h-[clamp(224px,38vh,320px)] island-float drop-shadow-md overflow-visible"></svg>
+        </div>
+
+        <button id="home-next-month" title="下一個月份花園" class="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 text-[#1d4237] drop-shadow-[0_2px_5px_rgba(255,255,255,0.95)] hover:scale-110 active:scale-95 disabled:opacity-20 disabled:pointer-events-none transition"></button>
+
+        <!-- 懸浮於底部的精簡月份、佈置入口與植物統計膠囊（z-35 獨立於小島上下文之上，絕不被雨絲與泡泡遮擋） -->
+        <div id="home-floating-info" class="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center" style="z-index: 35 !important;">
+          <div class="pointer-events-auto sky-pill rounded-2xl px-3.5 py-1.5 text-center space-y-0.5 max-w-full">
+            <div class="flex items-center justify-center gap-1.5 flex-wrap">
+              <span id="home-region-month-title" class="text-sm font-extrabold text-[#1d4237]">2026-11 ・ 春櫻花圃</span>
+              <span id="home-region-status-tag" class="text-xs px-2 py-0.5 rounded-full bg-[#2b5e4e]/12 text-[#1d4237] font-semibold">當月花園</span>
+              <button type="button" id="btn-enter-fullscreen-garden" class="bg-white/95 border border-[#e5dec9] shadow-sm px-2.5 py-0.5 rounded-full text-xs font-semibold text-[#1d4237] inline-flex items-center gap-1 hover:bg-white transition"></button>
+            </div>
+            <div id="home-region-subinfo" class="text-xs text-[#5c5046]/90 font-medium flex items-center justify-center gap-2"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ==================== 全螢幕花園頁（含左右切換月份箭頭、下方資訊與自製 SVG 導覽列） ==================== -->
+    <main id="screen-garden" class="hidden flex-1 flex flex-col justify-between relative">
+      <!-- 頂部導覽列（z-30 確保高於前景動態層 z-25，絕不被泡泡或雨絲遮擋） -->
+      <header class="relative z-30 px-4 py-3 bg-[#fffdf8]/85 backdrop-blur border-b border-[#e5dec9] flex items-center justify-between text-xs">
+        <button id="btn-back-home" class="cozy-pill px-3 py-1.5 rounded-xl text-[#382e26] font-semibold flex items-center gap-1"></button>
+        <div class="text-center">
+          <div id="garden-header-title" class="font-extrabold text-sm text-[#1d4237]">我的隨筆花園</div>
+          <div class="flex items-center justify-center gap-3 text-xs text-[#5c5046] mt-0.5">
+            <span id="garden-header-energy" class="font-bold text-[#2b5e4e] inline-flex items-center gap-1"></span>
+            <span id="garden-header-bag" class="font-bold text-[#4a6b5d] inline-flex items-center gap-1"></span>
+          </div>
+        </div>
+        <button data-open-modal="settings" class="cozy-pill p-2 rounded-xl text-[#382e26]" id="btn-garden-settings"></button>
+      </header>
+
+      <!-- 種植／移動模式提示條 -->
+      <div id="placing-banner" class="hidden relative z-30 bg-[#2b5e4e] text-[#fffdf8] text-xs px-4 py-2.5 flex items-center justify-between shadow-sm">
+        <span id="placing-text" class="font-medium">請點選花園上的空位光圈</span>
+        <button id="btn-cancel-placing" class="px-3 py-0.5 rounded-full bg-white/20 font-semibold">取消</button>
+      </div>
+
+      <!-- 全螢幕頂部背景切換框列（若僅擁有預設背景則預設 hidden 不顯示，z-30 確保高於前景層） -->
+      <div id="garden-bg-selector-bar" class="hidden relative z-30 px-3 py-1.5 flex items-center justify-center gap-2 overflow-x-auto no-scrollbar"></div>
+
+      <!-- 2.5D 等距漂浮小島主舞台（小島本體設為 z-10 讓天候自然遮擋，懸浮資訊膠囊設為 z-35 脫離小島上下文，絕不受遮擋） -->
+      <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden">
+        <div id="full-garden-viewport" class="w-full flex-1 relative flex items-center justify-center overflow-hidden cursor-grab active:cursor-grabbing touch-none z-10">
+          <button id="full-prev-month" title="上一個月份花園" class="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 text-[#1d4237] drop-shadow-[0_2px_6px_rgba(255,255,255,0.95)] hover:scale-110 active:scale-95 disabled:opacity-20 disabled:pointer-events-none transition"></button>
+
+          <svg id="full-island-svg" viewBox="-215 -185 430 420" class="w-full h-full max-h-[380px] island-float drop-shadow-lg overflow-visible"></svg>
+
+          <button id="full-next-month" title="下一個月份花園" class="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 text-[#1d4237] drop-shadow-[0_2px_6px_rgba(255,255,255,0.95)] hover:scale-110 active:scale-95 disabled:opacity-20 disabled:pointer-events-none transition"></button>
+        </div>
+
+        <!-- 懸浮於底部的月份與區域資訊膠囊（style z-index 35 脫離小島上下文，絕不被雨絲與泡泡遮擋） -->
+        <div id="full-floating-info" class="pointer-events-none absolute inset-x-3 bottom-2.5 flex justify-center" style="z-index: 35 !important;">
+          <div class="sky-pill rounded-2xl px-3.5 py-1.5 text-center space-y-0.5 max-w-full">
+            <div class="flex items-center justify-center gap-2">
+              <span id="full-region-month-title" class="text-sm font-extrabold text-[#1d4237]">2026-11 ・ 春櫻花圃</span>
+              <span id="full-region-badge" class="text-xs px-2 py-0.5 rounded-full bg-[#2b5e4e] text-[#fffdf8] font-semibold">當月花園</span>
+            </div>
+            <div id="full-region-subinfo" class="text-xs text-[#5c5046] font-medium flex items-center justify-center gap-2.5"></div>
+            <div class="text-[11px] text-[#628b78]">點選空位可種植或佈置，拖曳與雙指縮放可查看大島嶼</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部 5 大功能導覽列（z-30 確保高於前景動態層，絕不被雨絲與泡泡遮擋） -->
+      <nav class="relative z-30 px-3 py-2.5 bg-[#fffdf8]/95 backdrop-blur border-t border-[#e5dec9] grid grid-cols-5 gap-1.5 text-xs font-bold text-[#382e26]" id="garden-bottom-nav">
+        <button data-open-modal="shop" class="py-1.5 rounded-2xl hover:bg-[#f6f0e4] flex flex-col items-center gap-1 transition" id="nav-btn-shop"></button>
+        <button data-open-modal="bag" class="py-1.5 rounded-2xl hover:bg-[#f6f0e4] flex flex-col items-center gap-1 transition" id="nav-btn-bag"></button>
+        <button data-open-modal="dex" class="py-1.5 rounded-2xl hover:bg-[#f6f0e4] flex flex-col items-center gap-1 transition" id="nav-btn-dex"></button>
+        <button data-open-modal="album" class="py-1.5 rounded-2xl hover:bg-[#f6f0e4] flex flex-col items-center gap-1 transition" id="nav-btn-album"></button>
+        <button data-open-modal="group" class="py-1.5 rounded-2xl hover:bg-[#f6f0e4] flex flex-col items-center gap-1 transition" id="nav-btn-group"></button>
+      </nav>
+    </main>
+
+    <!-- ==================== 所有隨筆頁（按月份呈現，依日期由新到舊每日一列，每列可左右滑動，同屏約顯示 3 列） ==================== -->
+    <main id="screen-essays" class="hidden z-10 flex-1 flex flex-col h-screen max-h-screen overflow-hidden relative">
+      <header class="shrink-0 relative z-30 px-3 py-3 bg-[#fffdf8]/85 backdrop-blur border-b border-[#e5dec9] flex items-center justify-between gap-2 text-xs">
+        <button type="button" id="btn-essays-back-home" title="返回首頁" aria-label="返回首頁" class="shrink-0 w-8 h-8 rounded-xl cozy-pill text-[#382e26] flex items-center justify-center hover:bg-white active:scale-95 transition"></button>
+        <div class="flex-1 min-w-0 flex items-center justify-center gap-1.5">
+          <button type="button" id="essays-prev-month" title="上一個月" aria-label="上一個月" class="shrink-0 w-7 h-7 rounded-full cozy-pill text-[#1d4237] flex items-center justify-center hover:bg-white active:scale-95 disabled:opacity-25 disabled:pointer-events-none transition"></button>
+          <div class="text-center min-w-0 px-0.5">
+            <div id="essays-month-title" class="font-extrabold text-sm text-[#1d4237] whitespace-nowrap">所有隨筆</div>
+            <div id="essays-total-subtitle" class="text-[11px] text-[#5c5046] mt-0.5 whitespace-nowrap"></div>
+          </div>
+          <button type="button" id="essays-next-month" title="下一個月" aria-label="下一個月" class="shrink-0 w-7 h-7 rounded-full cozy-pill text-[#1d4237] flex items-center justify-center hover:bg-white active:scale-95 disabled:opacity-25 disabled:pointer-events-none transition"></button>
+        </div>
+        <div class="w-8 shrink-0" aria-hidden="true"></div>
+      </header>
+      <div id="essays-day-list" class="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar px-4 py-3 space-y-3"></div>
+    </main>
+
+    <!-- 通用彈窗容器 -->
+    <div id="modal-overlay" class="hidden fixed inset-0 z-40 bg-[#1d4237]/45 backdrop-blur-sm flex items-center justify-center p-3">
+      <div id="modal-box" class="w-full max-w-md cozy-card rounded-3xl p-4 shadow-2xl"></div>
+    </div>
+  </div>
+
+  <script type="module" src="./app.js?v=20261121t"></script>
+</body>
+</html>

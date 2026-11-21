@@ -1,0 +1,107 @@
+{
+  "dayBoundaryHour": 4,
+  "minWords": 10,
+  "dailySeedCap": 3,
+  "seedBagCap": 30,
+  "homeEssayLimit": 10,
+  "rarityFormula": {
+    "cap": 100,
+    "offset": 10
+  },
+  "pityThreshold": 10,
+  "decomposeEnergy": {
+    "common": 2,
+    "rare": 5,
+    "epic": 10,
+    "legendary": 20
+  },
+  "dailyBaseEnergy": 10,
+  "streakMultipliers": [
+    [1, 1],
+    [7, 1.5],
+    [30, 2]
+  ],
+  "overflowWordsPerEnergy": 10,
+  "milestones": [7, 30, 100, 365],
+  "clearWitheredCost": 5,
+  "makeUpCost": 30,
+  "regionSize": {
+    "personal": 5,
+    "group": 6
+  },
+  "expansionCosts": [100, 250, 500, 800],
+  "groupGrowthMultiplier": {
+    "1": 1,
+    "2": 1.5,
+    "3": 2,
+    "4": 2.5,
+    "5": 3
+  },
+  "maxGroupMembers": 5,
+  "beauty": {
+    "rarityWeight": {
+      "common": 1,
+      "rare": 2,
+      "epic": 4,
+      "legendary": 8
+    },
+    "decorDivisor": 10,
+    "witheredPenalty": 2
+  },
+  "spriteScale": {
+    "standardSpriteWidth": 220,
+    "tileWidth": 68.8,
+    "maxAdjacentTiles": 2,
+    "stageRatios": {
+      "Lv1": 0.4,
+      "Lv1_wilt": 0.4,
+      "Lv1_dead": 0.4,
+      "Lv2": 0.55,
+      "Lv2_wilt": 0.55,
+      "Lv2_dead": 0.55,
+      "Lv3": 0.7,
+      "Lv3_wilt": 0.7,
+      "Lv3_dead": 0.7,
+      "Lv4": 0.85,
+      "Lv4_wilt": 0.85,
+      "Lv4_dead": 0.85,
+      "Lv5": 1.0,
+      "perfect": 1.34,
+      "dead": 1.0
+    },
+    "plantCategories": {
+      "mini_ground": {
+        "rule": "W150",
+        "ids": ["fo_c2", "fo_r1", "fo_e2", "oa_c1", "oa_c4", "oa_r1", "cm_c1"]
+      },
+      "shrub_bush": {
+        "rule": "W200",
+        "ids": ["fb_c2", "fb_r1", "fb_r2", "fb_r3", "fo_c1", "fo_c5", "oa_r3", "cm_c2", "cm_r2"]
+      },
+      "upright_flower": {
+        "rule": "H190",
+        "ids": ["fb_c1", "fb_c3", "fb_c4", "fb_c5", "oa_c2", "oa_c3", "oa_c5"]
+      },
+      "bonsai_sapling": {
+        "rule": "H210",
+        "ids": ["oa_r2", "cm_r1", "lim_7"]
+      },
+      "standard_tree": {
+        "rule": "H230",
+        "ids": ["fb_r4", "fb_e1", "fb_e2", "fo_c3", "fo_c4", "fo_r2", "fo_r3", "fo_r4", "fo_e1", "oa_r4", "oa_e1", "oa_e2", "cm_e1"]
+      },
+      "giant_sacred": {
+        "rule": "H240",
+        "ids": ["fb_l1", "fo_l1", "oa_l1", "cm_l1", "lim_30", "lim_100", "lim_365"]
+      }
+    },
+    "decorSizes": {
+      "dec_rock": "W150",
+      "dec_pond": "W160",
+      "dec_bench": "W180",
+      "dec_lantern": "H130",
+      "dec_torii": "H300",
+      "dec_arch": "H300"
+    }
+  }
+}
