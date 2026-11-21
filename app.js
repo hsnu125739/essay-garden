@@ -6,13 +6,13 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261121t';
-import { GardenStore } from './store.js?v=20261121t';
-import { CloudGardenStore } from './cloud-store.js?v=20261121t';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261121t';
-import { bgManager } from './bg-manager.js?v=20261121t';
+} from './engine.js?v=20261122a';
+import { GardenStore } from './store.js?v=20261122a';
+import { CloudGardenStore } from './cloud-store.js?v=20261122a';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122a';
+import { bgManager } from './bg-manager.js?v=20261122a';
 
-const ASSET_VER = '20261121t';
+const ASSET_VER = '20261122a';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -246,8 +246,8 @@ export function icon(name, cls = 'w-4 h-4') {
       <circle cx="16.5" cy="9.5" r="2.3" fill="currentColor" fill-opacity="0.15" stroke="currentColor" stroke-width="1.8"/>
       <path d="M15 19C15 16.8 16.6 15 18.8 15C19.6 15 20.3 15.3 20.8 15.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>`,
     settings: `
-      <circle cx="12" cy="12" r="3.2" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="2"/>
-      <path d="M12 3.5V5.5M12 18.5V20.5M3.5 12H5.5M18.5 12H20.5M6 6L7.5 7.5M16.5 16.5L18 18M18 6L16.5 7.5M7.5 16.5L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>`,
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" fill="currentColor" fill-opacity="0.22" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="12" cy="12" r="3" fill="#ffffff" fill-opacity="0.85" stroke="currentColor" stroke-width="1.8"/>`,
     sparkles: `
       <path d="M12 3L14 8.5L19.5 10.5L14 12.5L12 18L10 12.5L4.5 10.5L10 8.5L12 3Z" fill="#f59e0b" fill-opacity="0.3" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`,
     lock: `
@@ -2470,13 +2470,13 @@ function renderModal() {
     return;
   }
 
-  // 13. 設定面板（雲端模式自動隱藏本機時間推進／+200能量／重置示範資料，提供登出帳號）
+  // 13. 設定面板（雲端模式自動隱藏本機時間推進／+200能量／重置示範資料，提供登出帳號；支援雙軌一鍵切換）
   if (ui.activeModal === 'settings') {
     const todayKey = store.currentDayKey(garden);
     box.innerHTML = `
       <div class="space-y-3 text-xs max-h-[80vh] overflow-y-auto">
         <div class="flex items-center justify-between">
-          <span class="font-extrabold text-base text-[#1d4237] flex items-center gap-1.5">${icon('settings', 'w-4 h-4')}<span>${store.isCloud ? '個人與花園設定' : '設定 ＆ 遊戲時間測試面板'}</span></span>
+          <span class="font-extrabold text-base text-[#1d4237] flex items-center gap-1.5">${icon('settings', 'w-4 h-4')}<span>${store.isCloud ? '個人與花園設定' : '設定 ＆ 管理者測試面板'}</span></span>
           <button id="modal-close" class="text-[#786b5e] font-semibold px-2 py-1">關閉</button>
         </div>
 
@@ -2491,23 +2491,29 @@ function renderModal() {
 
         ${!store.isCloud ? `
           <div class="p-3 rounded-2xl bg-amber-50 border border-amber-200 space-y-2">
-            <div class="font-bold text-amber-900">開發驗證：時間推進模擬器（測試連續天數、斷簽枯萎、補寫與換月）</div>
+            <div class="flex items-center justify-between">
+              <div class="font-bold text-amber-900">管理者測試面板（時間推進與能量模擬）</div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 text-amber-800 font-semibold">本機測試</span>
+            </div>
             <div class="grid grid-cols-2 gap-1.5">
               <button id="btn-sim-nextday" class="py-2 px-2 rounded-xl bg-[#df8a2b] text-white font-bold">+1 天（進入明天）</button>
-              <button id="btn-sim-skip2" class="py-2 px-2 rounded-xl bg-rose-700 text-white font-bold">+2 天（測試斷簽進入 wilt 枯萎）</button>
+              <button id="btn-sim-skip2" class="py-2 px-2 rounded-xl bg-rose-700 text-white font-bold">+2 天（測試斷簽枯萎）</button>
               <button id="btn-sim-month-end" class="py-2 px-2 rounded-xl bg-[#2b5e4e] text-white font-bold">跳至本月最後一天</button>
               <button id="btn-sim-add-energy" class="py-2 px-2 rounded-xl bg-[#382e26] text-white font-bold">+200 測試能量</button>
             </div>
           </div>
 
           <div class="pt-2 border-t border-[#e5dec9] flex justify-between items-center">
-            <span class="text-[#786b5e]">獨立數值設定檔：game-config.json</span>
             <button id="btn-reset-all" class="px-3 py-1.5 rounded-xl bg-rose-100 text-rose-800 font-semibold">重置初始示範資料</button>
+            <button id="btn-switch-mode" class="px-3 py-1.5 rounded-xl bg-emerald-100 text-emerald-800 font-semibold">切換為雲端多人版</button>
           </div>
         ` : `
           <div class="pt-2 border-t border-[#e5dec9] flex justify-between items-center">
             <span class="text-[#786b5e]">目前登入 ID：<strong>${escapeHtml(user.uid)}</strong></span>
-            <button id="btn-logout" class="px-3.5 py-1.5 rounded-xl bg-rose-100 text-rose-800 font-bold">登出帳號</button>
+            <div class="flex gap-2">
+              <button id="btn-switch-mode" class="px-3 py-1.5 rounded-xl bg-amber-100 text-amber-800 font-bold">切換為管理者測試版</button>
+              <button id="btn-logout" class="px-3.5 py-1.5 rounded-xl bg-rose-100 text-rose-800 font-bold">登出帳號</button>
+            </div>
           </div>
         `}
       </div>`;
@@ -2525,6 +2531,16 @@ function renderModal() {
         renderApp();
       });
     };
+
+    const switchModeBtn = document.getElementById('btn-switch-mode');
+    if (switchModeBtn) {
+      switchModeBtn.onclick = () => {
+        const targetMode = store.isCloud ? 'local' : 'cloud';
+        const u = new URL(window.location.href);
+        u.searchParams.set('mode', targetMode);
+        window.location.href = u.toString();
+      };
+    }
 
     if (!store.isCloud) {
       document.getElementById('btn-sim-nextday').onclick = () => {

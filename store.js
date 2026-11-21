@@ -12,7 +12,7 @@ import {
   evaluatePlantState,
   calculateBeauty,
   resolveGroupThemeVote
-} from './engine.js?v=20261121t';
+} from './engine.js?v=20261122a';
 
 const STORAGE_KEY = 'essay_garden_state_v4';
 
