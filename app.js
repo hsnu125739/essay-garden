@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122x';
+} from './engine.js?v=20261122y';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122x';
-import { CloudGardenStore } from './cloud-store.js?v=20261122x';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122x';
-import { bgManager } from './bg-manager.js?v=20261122x';
+} from './store.js?v=20261122y';
+import { CloudGardenStore } from './cloud-store.js?v=20261122y';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122y';
+import { bgManager } from './bg-manager.js?v=20261122y';
 
-const ASSET_VER = '20261122x';
+const ASSET_VER = '20261122y';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -855,8 +855,8 @@ function alignFullIslandViewBox(regionSize) {
   const bottomY = islY + islH;
   const centerY = islY + islH / 2;
 
-  // 目標中心：對齊至視窗中心偏上 50px（使用者原則：中心高度 = 視窗中心高度 - 50px）；底線：泥土尖端絕不插入最下方選單
-  const targetScreenY = winH / 2 - 50;
+  // 目標中心：對齊至視窗中心下方 50px（使用者原則：中心高度 = 視窗中心高度 + 50px）；底線：泥土尖端絕不插入最下方選單
+  const targetScreenY = winH / 2 + 50;
   const svgBaseCenterY = sr.top + sr.height / 2;
   const vbCyTarget = centerY - (targetScreenY - svgBaseCenterY) / scale;
   const vbCyMin = bottomY - ((navTop - 12) - svgBaseCenterY) / scale;
