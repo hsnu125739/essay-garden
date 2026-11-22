@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122w';
+} from './engine.js?v=20261122x';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122w';
-import { CloudGardenStore } from './cloud-store.js?v=20261122w';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122w';
-import { bgManager } from './bg-manager.js?v=20261122w';
+} from './store.js?v=20261122x';
+import { CloudGardenStore } from './cloud-store.js?v=20261122x';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122x';
+import { bgManager } from './bg-manager.js?v=20261122x';
 
-const ASSET_VER = '20261122w';
+const ASSET_VER = '20261122x';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -827,14 +827,14 @@ const FULL_VB_X = -300;
 const FULL_VB_W = 600;
 const FULL_VB_H = 580;
 
-// 6x6~9x9 素材圖片下方繪製時帶有大片純透明空白（如 8x8 留白 74px、9x9 留白 96px）
-// 此處記錄每種尺寸真實可視圖素的高度比率，用以精確扣除空白計算可視中心與真實尖端
-const ISLAND_VISUAL_H_RATIO = {
-  5: 1.0,
-  6: 473 / 504,
-  7: 536 / 588,
-  8: 598 / 672,
-  9: 660 / 756
+// 5x5~9x9 島嶼底座已實體裁切去除底部無意義純透明空白
+// 此處對應各尺寸在 SVG 幾何空間中的真實寬高
+const ISLAND_DIMS = {
+  5: { w: 420, h: 410 },
+  6: { w: 504, h: 462 },
+  7: { w: 588, h: 524 },
+  8: { w: 672, h: 584 },
+  9: { w: 756, h: 645 }
 };
 
 function alignFullIslandViewBox(regionSize) {
@@ -849,21 +849,17 @@ function alignFullIslandViewBox(regionSize) {
   const navTop = navEl ? navEl.getBoundingClientRect().top : winH - 65;
 
   const N = Math.min(9, Math.max(5, regionSize || BASE_GRID_N));
-  const islandScale = N / BASE_GRID_N;
-  const islY = -175 * islandScale;
-  const islH = 410 * islandScale;
+  const dims = ISLAND_DIMS[N] || { w: 420 * (N / BASE_GRID_N), h: 410 * (N / BASE_GRID_N) };
+  const islY = -175 * (N / BASE_GRID_N);
+  const islH = dims.h;
+  const bottomY = islY + islH;
+  const centerY = islY + islH / 2;
 
-  // 扣除素材底部無意義純透明空白後的真實可視高度、中心與尖端
-  const ratio = ISLAND_VISUAL_H_RATIO[N] || 1.0;
-  const realH = islH * ratio;
-  const realBottomY = islY + realH;
-  const realCenterY = islY + realH / 2;
-
-  // 目標中心：調低至視窗中心下方 80px，地表與神木處於視覺中央；底線：真實泥土尖端絕不插入最下方選單
-  const targetScreenY = winH / 2 + 80;
+  // 目標中心：對齊至視窗中心偏上 50px（使用者原則：中心高度 = 視窗中心高度 - 50px）；底線：泥土尖端絕不插入最下方選單
+  const targetScreenY = winH / 2 - 50;
   const svgBaseCenterY = sr.top + sr.height / 2;
-  const vbCyTarget = realCenterY - (targetScreenY - svgBaseCenterY) / scale;
-  const vbCyMin = realBottomY - ((navTop - 12) - svgBaseCenterY) / scale;
+  const vbCyTarget = centerY - (targetScreenY - svgBaseCenterY) / scale;
+  const vbCyMin = bottomY - ((navTop - 12) - svgBaseCenterY) / scale;
   const vbCy = Math.max(vbCyTarget, vbCyMin);
   const vbY = vbCy - FULL_VB_H / 2;
   fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
@@ -877,17 +873,17 @@ function renderIsometricIsland(evalData, options = {}) {
   const pan = options.pan || { x: 0, y: 0 };
   const zoom = options.zoom || 1;
 
-  // 擴地時整座島嶼土地按 N / 5 比例真實變大（格子與植物保持原尺寸不縮小）
-  const islandScale = N / BASE_GRID_N;
-  const islW = 420 * islandScale;
-  const islH = 410 * islandScale;
-  const islX = -210 * islandScale;
-  const islY = -175 * islandScale;
-
-  // 1. 底層：依當前尺寸 N (5x5 ~ 9x9) 載入對應獨立繪製的 2.5D 立體浮空島底座圖
+  // 依當前尺寸 N 取得已裁切底座之幾何尺寸（寬度依照 N / 5 等比放大，高度為素材真實高度）
   const clampedN = Math.min(9, Math.max(5, N));
+  const dims = ISLAND_DIMS[clampedN] || { w: 420 * (clampedN / BASE_GRID_N), h: 410 * (clampedN / BASE_GRID_N) };
+  const islW = dims.w;
+  const islH = dims.h;
+  const islX = -islW / 2;
+  const islY = -175 * (clampedN / BASE_GRID_N);
+
+  // 1. 底層：載入已實體裁切之 2.5D 立體浮空島底座圖
   const svg = `
-    <image href="./assets/islands/${theme}_${clampedN}x${clampedN}.png?v=${ASSET_VER}" x="${islX.toFixed(1)}" y="${islY.toFixed(1)}" width="${islW.toFixed(1)}" height="${islH.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`;
+    <image href="./assets/islands/${theme}_${clampedN}x${clampedN}.png?v=${ASSET_VER}" x="${islX.toFixed(1)}" y="${islY.toFixed(1)}" width="${islW.toFixed(1)}" height="${islH.toFixed(1)}" preserveAspectRatio="none"/>`;
 
   // 2. 依設定檔 spriteScale 規格與等距網格動態換算渲染大小，再交由 computeNeighborAdjustedScales 處理相鄰等比縮小
   const { standardSpriteWidth, tileWidth, maxAdjacentTiles } = config.spriteScale;
