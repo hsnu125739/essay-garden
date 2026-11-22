@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122s';
+} from './engine.js?v=20261122t';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122s';
-import { CloudGardenStore } from './cloud-store.js?v=20261122s';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122s';
-import { bgManager } from './bg-manager.js?v=20261122s';
+} from './store.js?v=20261122t';
+import { CloudGardenStore } from './cloud-store.js?v=20261122t';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122t';
+import { bgManager } from './bg-manager.js?v=20261122t';
 
-const ASSET_VER = '20261122s';
+const ASSET_VER = '20261122t';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -823,6 +823,29 @@ function alignHomeIslandViewBox(regionSize) {
   homeSvg.setAttribute('viewBox', `${HOME_VB_X} ${vbY.toFixed(1)} ${HOME_VB_W} ${HOME_VB_H}`);
 }
 
+const FULL_VB_X = -300;
+const FULL_VB_W = 600;
+const FULL_VB_H = 580;
+
+function alignFullIslandViewBox(regionSize) {
+  const fullSvg = document.getElementById('full-island-svg');
+  if (!fullSvg) return;
+  const sr = fullSvg.getBoundingClientRect();
+  if (!sr.width || !sr.height) return;
+
+  const scale = Math.min(sr.width / FULL_VB_W, sr.height / FULL_VB_H);
+  const winH = window.innerHeight;
+  const targetScreenY = winH / 2 + 50; // 原則：花園島圖片中心高度 = 視窗中心高度下方 50px
+
+  const islandScale = (regionSize || BASE_GRID_N) / BASE_GRID_N;
+  const centerLocalY = -175 * islandScale + 205 * islandScale;
+
+  const svgBaseCenterY = sr.top + sr.height / 2;
+  const vbCy = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
+  const vbY = vbCy - FULL_VB_H / 2;
+  fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
+}
+
 function renderIsometricIsland(evalData, options = {}) {
   const { region, plantsWithState, decorList } = evalData;
   const N = region.size;
@@ -1454,8 +1477,14 @@ function renderActiveIslandSvg(viewGarden, evalData) {
   }
   const fullVp = document.getElementById('full-garden-viewport');
   const fullSvg = document.getElementById('full-island-svg');
+  alignFullIslandViewBox(evalData.region.size);
   ui.pan = clampIslandPan(fullVp, fullSvg, ui.pan.x, ui.pan.y, ui.zoom, { topPadPx: ISLAND_FULL_TOP_PAD_PX });
   fullSvg.innerHTML = renderIsometricIsland(evalData, { interactive: true, placingMode: Boolean(ui.placingMode), pan: ui.pan, zoom: ui.zoom });
+  requestAnimationFrame(() => {
+    if (ui.screen === 'garden' && lastIslandContext) {
+      alignFullIslandViewBox(lastIslandContext.evalData.region.size);
+    }
+  });
 }
 
 function handleGardenCellClick(gardenId, evalData, x, y) {
@@ -2906,6 +2935,8 @@ async function boot() {
   window.addEventListener('resize', () => {
     if (ui.screen === 'home' && lastIslandContext) {
       alignHomeIslandViewBox(lastIslandContext.evalData.region.size);
+    } else if (ui.screen === 'garden' && lastIslandContext) {
+      alignFullIslandViewBox(lastIslandContext.evalData.region.size);
     }
     updateEssayCardLineClamps();
   });
