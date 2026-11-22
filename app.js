@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122h';
+} from './engine.js?v=20261122i';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122h';
-import { CloudGardenStore } from './cloud-store.js?v=20261122h';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122h';
-import { bgManager } from './bg-manager.js?v=20261122h';
+} from './store.js?v=20261122i';
+import { CloudGardenStore } from './cloud-store.js?v=20261122i';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122i';
+import { bgManager } from './bg-manager.js?v=20261122i';
 
-const ASSET_VER = '20261122h';
+const ASSET_VER = '20261122i';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -971,7 +971,7 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
 
   return `
     <div role="button" tabindex="0" data-essay-id="${e.id}" style="${memoStyleAttr(card)}${floatStyle}" class="essay-card shrink-0 ${sizeCls} memo-note flex flex-col justify-between cursor-pointer active:scale-[0.98] transition">
-      <span class="flex-1 w-full overflow-hidden"><span class="${textCls}">${escapeHtml(e.content)}</span></span>
+      <div class="essay-text-wrap flex-1 w-full overflow-hidden min-h-0"><div class="${textCls}">${escapeHtml(e.content)}</div></div>
       <span class="flex items-center justify-between gap-1 w-full pt-1.5 mt-1 border-t border-[#d8cbb8]/55 text-xs">
         <span class="flex items-center gap-1 min-w-0">
           <span class="w-5 h-5 rounded-full ${avatarCls} text-xs font-bold flex items-center justify-center shrink-0">${escapeHtml(avatarChar)}</span>
@@ -982,7 +982,46 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
     </div>`;
 }
 
+function updateEssayCardLineClamps(containerEl = document) {
+  const cards = containerEl?.querySelectorAll ? containerEl.querySelectorAll('.essay-card') : [];
+  if (!cards || !cards.length) return;
+
+  cards.forEach(cardEl => {
+    const wrapEl = cardEl.querySelector('.essay-text-wrap');
+    const textEl = cardEl.querySelector('.memo-text, .memo-text-compact');
+    if (!wrapEl || !textEl) return;
+
+    const textArea_h = wrapEl.clientHeight || wrapEl.getBoundingClientRect().height;
+    if (textArea_h <= 0) return;
+
+    const computedStyle = window.getComputedStyle(textEl);
+    let line_h = parseFloat(computedStyle.lineHeight);
+    if (!line_h || isNaN(line_h)) {
+      const fontSize = parseFloat(computedStyle.fontSize) || 13;
+      line_h = fontSize * 1.48;
+    }
+
+    // 隨筆卡文字區域高度 (textArea_h) 與行高 (line_h) 相除取高斯 (Math.floor)
+    const lines = Math.floor(textArea_h / line_h);
+    const maxLines = Math.max(1, lines);
+
+    textEl.style.webkitLineClamp = String(maxLines);
+    textEl.style.setProperty('-webkit-line-clamp', String(maxLines));
+  });
+}
+
 function bindEssayCards(containerEl, essayById) {
+  updateEssayCardLineClamps(containerEl);
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => updateEssayCardLineClamps(containerEl));
+  }
+  if (typeof ResizeObserver !== 'undefined' && containerEl && !containerEl.__clampObserver) {
+    containerEl.__clampObserver = new ResizeObserver(() => {
+      updateEssayCardLineClamps(containerEl);
+    });
+    containerEl.__clampObserver.observe(containerEl);
+  }
+
   containerEl.querySelectorAll('.essay-card').forEach(cardEl => {
     const target = essayById.get(cardEl.dataset.essayId);
     const reactBtn = cardEl.querySelector('[data-react-btn]');
@@ -2868,6 +2907,7 @@ async function boot() {
     if (ui.screen === 'home' && lastIslandContext) {
       alignHomeIslandViewBox(lastIslandContext.evalData.region.size);
     }
+    updateEssayCardLineClamps();
   });
 
   const updateTailPullFeedback = (rowEl, pullPx) => {
