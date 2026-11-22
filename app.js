@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122v';
+} from './engine.js?v=20261122w';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122v';
-import { CloudGardenStore } from './cloud-store.js?v=20261122v';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122v';
-import { bgManager } from './bg-manager.js?v=20261122v';
+} from './store.js?v=20261122w';
+import { CloudGardenStore } from './cloud-store.js?v=20261122w';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122w';
+import { bgManager } from './bg-manager.js?v=20261122w';
 
-const ASSET_VER = '20261122v';
+const ASSET_VER = '20261122w';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -827,6 +827,16 @@ const FULL_VB_X = -300;
 const FULL_VB_W = 600;
 const FULL_VB_H = 580;
 
+// 6x6~9x9 素材圖片下方繪製時帶有大片純透明空白（如 8x8 留白 74px、9x9 留白 96px）
+// 此處記錄每種尺寸真實可視圖素的高度比率，用以精確扣除空白計算可視中心與真實尖端
+const ISLAND_VISUAL_H_RATIO = {
+  5: 1.0,
+  6: 473 / 504,
+  7: 536 / 588,
+  8: 598 / 672,
+  9: 660 / 756
+};
+
 function alignFullIslandViewBox(regionSize) {
   const fullSvg = document.getElementById('full-island-svg');
   if (!fullSvg) return;
@@ -838,15 +848,22 @@ function alignFullIslandViewBox(regionSize) {
   const navEl = document.getElementById('garden-bottom-nav');
   const navTop = navEl ? navEl.getBoundingClientRect().top : winH - 65;
 
-  const islandScale = (regionSize || BASE_GRID_N) / BASE_GRID_N;
-  const centerLocalY = -175 * islandScale + 205 * islandScale;
-  const islBottomY = -175 * islandScale + 410 * islandScale;
-  const svgBaseCenterY = sr.top + sr.height / 2;
+  const N = Math.min(9, Math.max(5, regionSize || BASE_GRID_N));
+  const islandScale = N / BASE_GRID_N;
+  const islY = -175 * islandScale;
+  const islH = 410 * islandScale;
 
-  // 原則：調低島嶼位置消除偏高感；保護底線：泥土尖端絕不插入最下方選單（距選單頂部至少保留 8px）
-  const targetScreenY = winH / 2 + 130;
-  const vbCyTarget = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
-  const vbCyMin = islBottomY - ((navTop - 8) - svgBaseCenterY) / scale;
+  // 扣除素材底部無意義純透明空白後的真實可視高度、中心與尖端
+  const ratio = ISLAND_VISUAL_H_RATIO[N] || 1.0;
+  const realH = islH * ratio;
+  const realBottomY = islY + realH;
+  const realCenterY = islY + realH / 2;
+
+  // 目標中心：調低至視窗中心下方 80px，地表與神木處於視覺中央；底線：真實泥土尖端絕不插入最下方選單
+  const targetScreenY = winH / 2 + 80;
+  const svgBaseCenterY = sr.top + sr.height / 2;
+  const vbCyTarget = realCenterY - (targetScreenY - svgBaseCenterY) / scale;
+  const vbCyMin = realBottomY - ((navTop - 12) - svgBaseCenterY) / scale;
   const vbCy = Math.max(vbCyTarget, vbCyMin);
   const vbY = vbCy - FULL_VB_H / 2;
   fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
