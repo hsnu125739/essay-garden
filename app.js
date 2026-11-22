@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122q';
+} from './engine.js?v=20261122r';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122q';
-import { CloudGardenStore } from './cloud-store.js?v=20261122q';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122q';
-import { bgManager } from './bg-manager.js?v=20261122q';
+} from './store.js?v=20261122r';
+import { CloudGardenStore } from './cloud-store.js?v=20261122r';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122r';
+import { bgManager } from './bg-manager.js?v=20261122r';
 
-const ASSET_VER = '20261122q';
+const ASSET_VER = '20261122r';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1368,11 +1368,11 @@ function renderApp() {
       fullTipEl.classList.toggle('hidden', isArchived);
     }
     document.getElementById('full-region-subinfo').innerHTML = `
-      <span class="inline-flex items-center gap-1">${icon('sparkles', 'w-3.5 h-3.5 text-[#df8a2b]')}美觀度 ${evalData.beauty}</span>
-      <span>・</span>
-      <span>${evalData.region.size}×${evalData.region.size} 格</span>
-      <span>・</span>
-      <span>已長成 ${grownCount} 株 / 成長中 ${growingCount} 株</span>`;
+      <span class="inline-flex items-center gap-1 shrink-0 whitespace-nowrap">${icon('sparkles', 'w-3.5 h-3.5 text-[#df8a2b]')}美觀度 ${evalData.beauty}</span>
+      <span class="text-[#a89f91] shrink-0">・</span>
+      <span class="shrink-0 whitespace-nowrap">${evalData.region.size}×${evalData.region.size} 格</span>
+      <span class="text-[#a89f91] shrink-0">・</span>
+      <span class="shrink-0 whitespace-nowrap">已長成 ${grownCount} 株 / 成長中 ${growingCount} 株</span>`;
 
     const placeBar = document.getElementById('placing-banner');
     if (ui.placingMode) {
