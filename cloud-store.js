@@ -7,9 +7,9 @@ import {
   getStreakMultiplier,
   evaluatePlantState,
   calculateBeauty
-} from './engine.js?v=20261121t';
-import { createMemoryStorage } from './store.js?v=20261121t';
-import { CloudClient, SESSION_STORAGE_KEY } from './cloud-client.js?v=20261121t';
+} from './engine.js?v=20261122b';
+import { createMemoryStorage } from './store.js?v=20261122b';
+import { CloudClient, SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122b';
 
 export const CLOUD_STATE_STORAGE_KEY = 'essay_garden_state_v4';
 export const CARD_STYLE_STORAGE_KEY = 'essay_garden_card_style_v1';
@@ -663,6 +663,27 @@ export class CloudGardenStore {
         }
       }
     }
+
+    if (merged.size === 0) {
+      const garden = this.currentGarden();
+      const todayKey = this.currentDayKey(garden);
+      const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
+      merged.set('essay_welcome', {
+        id: 'essay_welcome',
+        authorUid: 'guide',
+        authorName: '花園嚮導',
+        regionId: garden?.activeRegionId || '',
+        dayKey: todayKey,
+        content: welcomeContent,
+        wordCount: countEssayWords(welcomeContent),
+        private: false,
+        cardStyle: 'card2',
+        reward: { type: 'seed', speciesId: 'fb_c1' },
+        createdAt: Date.now() - 3600000,
+        updatedAt: Date.now() - 3600000
+      });
+    }
+
     return Array.from(merged.values()).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
   }
 

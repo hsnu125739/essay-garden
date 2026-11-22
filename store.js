@@ -12,7 +12,7 @@ import {
   evaluatePlantState,
   calculateBeauty,
   resolveGroupThemeVote
-} from './engine.js?v=20261122a';
+} from './engine.js?v=20261122b';
 
 const STORAGE_KEY = 'essay_garden_state_v4';
 
@@ -78,6 +78,26 @@ export class GardenStore {
       try {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.users && parsed.gardens && parsed.currentUserId && parsed.users[parsed.currentUserId]) {
+          for (const g of Object.values(parsed.gardens || {})) {
+            if (Array.isArray(g.essays) && g.essays.some(e => String(e.id || '').startsWith('essay_demo'))) {
+              const todayKey = getGameDayKey(Date.now(), g.timezone || 'Asia/Taipei', this.config.dayBoundaryHour);
+              const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
+              g.essays = [{
+                id: 'essay_welcome',
+                authorUid: 'guide',
+                authorName: '花園嚮導',
+                regionId: g.activeRegionId,
+                dayKey: todayKey,
+                content: welcomeContent,
+                wordCount: countEssayWords(welcomeContent),
+                private: false,
+                cardStyle: 'card2',
+                reward: { type: 'seed', speciesId: 'fb_c1' },
+                createdAt: Date.now() - 3600000,
+                updatedAt: Date.now() - 3600000
+              }];
+            }
+          }
           return parsed;
         }
         console.error('[GardenStore] Stored state schema invalid; backing up and resetting.');
@@ -314,29 +334,19 @@ export class GardenStore {
             }
           },
           essays: [
-            [1, '21:15', 'card3', 'fb_r1', '微風吹過午後的窗台，泡了一杯溫熱的伯爵茶。看著桌面上的光影慢慢移動，決定從今天起，每天留給自己十分鐘，把生活裡的微小光亮與思緒寫成隨筆，也看著這座小島一點一滴長出屬於自己的風景。'],
-            [1, '16:40', 'card1', 'fb_c2', '傍晚散步經過巷口的花店，聞到了淡淡的薰衣草香氣。有時候放慢腳步，才發現身邊藏著這麼多溫柔的小細節，回家後在花園種下第一顆種子。'],
-            [1, '09:20', 'card2', 'fb_c1', '早晨拉開窗簾時看見陽光剛好落在書桌一角，趁著腦袋還很清醒，把今天想完成的幾件小事條列寫下來，心情也跟著安穩許多。'],
-            [2, '20:50', 'card4', 'fo_c1', '晚上煮了一鍋番茄蔬菜湯，熱氣把微涼的房間暖了起來。偶爾為自己好好準備一頓簡單的晚餐，也是一種溫柔的照顧。'],
-            [2, '13:15', 'card5', 'fb_r2', '午休時間到陽台吹風，發現雲層縫隙透出很柔和的金色光束，抬頭看了幾分鐘，覺得下午又有力氣繼續專注工作了。'],
-            [3, '22:05', 'card6', 'cm_c1', '睡前把這週讀到的一句話抄在筆記本裡：慢慢走也沒關係，重要的是方向還在自己手裡。寫完這段就準備早點休息。'],
-            [3, '11:30', 'card7', 'fo_r1', '雨聲淅瀝瀝地敲著屋簷，泡杯熱可可聽完一張輕音樂專輯。這種不趕時間的節奏，讓人感覺呼吸都變得深長而平靜。'],
-            [5, '19:45', 'card1', 'fb_c3', '回家的路上看見公園長椅旁多了幾株新開的小黃花，忍不住停下來多看兩眼，生活裡的小驚喜總是出現在不經意的轉角。'],
-            [64, '18:20', 'card2', 'oa_c2', '今天比平常早起了二十分鐘，慢慢喝完一杯溫開水再出門，少了匆忙趕車的焦躁，整個人從容了許多。'],
-            [64, '08:50', 'card4', 'fo_c2', '傍晚的天空染上淡淡的橘粉色，路過河堤時晚風迎面吹來，把一整天累積的疲憊都帶走了一大半。'],
-            [70, '21:00', 'card6', 'fb_c1', '整理房間時翻出去年旅行的票根與明信片，想起當時在海邊看著日落的寧靜感，決定也在這裡多寫些日後能回看的文字。']
-          ].map(([dayOffset, time, cardStyle, speciesId, content], idx) => {
+            [0, '09:00', 'card2', 'fb_c1', '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！']
+          ].map(([dayOffset, time, cardStyle, speciesId, content]) => {
             const dayKey = addDays(todayKey, -dayOffset);
             const ts = new Date(`${dayKey}T${time}:00`).getTime();
             return {
-              id: `essay_demo${idx + 1}`,
-              authorUid: uid,
-              authorName: '旅人作家',
-              regionId: dayKey.slice(0, 7) === prevMonthKey ? prevRid : rid,
+              id: 'essay_welcome',
+              authorUid: 'guide',
+              authorName: '花園嚮導',
+              regionId: rid,
               dayKey,
               content,
               wordCount: countEssayWords(content),
-              private: true,
+              private: false,
               cardStyle,
               reward: { type: 'seed', speciesId },
               createdAt: ts,
@@ -456,6 +466,27 @@ export class GardenStore {
         }
       }
     }
+
+    if (merged.size === 0) {
+      const garden = this.state.gardens[activeGid] || Object.values(this.state.gardens)[0];
+      const todayKey = this.currentDayKey(garden);
+      const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
+      merged.set('essay_welcome', {
+        id: 'essay_welcome',
+        authorUid: 'guide',
+        authorName: '花園嚮導',
+        regionId: garden?.activeRegionId || '',
+        dayKey: todayKey,
+        content: welcomeContent,
+        wordCount: countEssayWords(welcomeContent),
+        private: false,
+        cardStyle: 'card2',
+        reward: { type: 'seed', speciesId: 'fb_c1' },
+        createdAt: Date.now() - 3600000,
+        updatedAt: Date.now() - 3600000
+      });
+    }
+
     return Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt);
   }
 

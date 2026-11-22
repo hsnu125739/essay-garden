@@ -6,13 +6,13 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122a';
-import { GardenStore } from './store.js?v=20261122a';
-import { CloudGardenStore } from './cloud-store.js?v=20261122a';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122a';
-import { bgManager } from './bg-manager.js?v=20261122a';
+} from './engine.js?v=20261122b';
+import { GardenStore } from './store.js?v=20261122b';
+import { CloudGardenStore } from './cloud-store.js?v=20261122b';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122b';
+import { bgManager } from './bg-manager.js?v=20261122b';
 
-const ASSET_VER = '20261122a';
+const ASSET_VER = '20261122b';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
