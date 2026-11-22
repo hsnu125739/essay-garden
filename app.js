@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122f';
+} from './engine.js?v=20261122g';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122f';
-import { CloudGardenStore } from './cloud-store.js?v=20261122f';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122f';
-import { bgManager } from './bg-manager.js?v=20261122f';
+} from './store.js?v=20261122g';
+import { CloudGardenStore } from './cloud-store.js?v=20261122g';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122g';
+import { bgManager } from './bg-manager.js?v=20261122g';
 
-const ASSET_VER = '20261122f';
+const ASSET_VER = '20261122g';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1066,9 +1066,8 @@ function renderApp() {
   document.body.dataset.theme = evalData.region.theme || 'flowerbed';
   const grownCount = evalData.plantsWithState.filter(p => p.evalState.stage === 'grown').length;
   const growingCount = evalData.plantsWithState.filter(p => p.evalState.stage === 'growing').length;
-  const statusBadge = evalData.region.status === 'snapshot'
-    ? '唯讀快照'
-    : (evalData.region.status === 'archived' ? '封存月份' : (viewGarden.type === 'group' ? '多人共用' : '當月花園'));
+  const isArchived = evalData.region.status === 'archived' || evalData.region.status === 'snapshot';
+  const statusBadge = isArchived ? '已封存' : '經營中';
 
   // 1. 優先提示條
   const banner = store.getPriorityBanner();
@@ -1183,7 +1182,7 @@ function renderApp() {
     homeNextBtn.onclick = () => stepMonth(1);
 
     document.getElementById('home-region-month-title').textContent = `${evalData.region.month} ・ ${themeInfo.name}`;
-    document.getElementById('home-region-status-tag').textContent = `${statusBadge} (${curIdx + 1}/${orderedRegions.length})`;
+    document.getElementById('home-region-status-tag').textContent = statusBadge;
     document.getElementById('home-region-subinfo').innerHTML = `
       <span class="inline-flex items-center gap-1">${icon('sparkles', 'w-3.5 h-3.5 text-[#df8a2b]')}美觀度 ${evalData.beauty}</span>
       <span>・</span>
@@ -1320,7 +1319,15 @@ function renderApp() {
     fullNextBtn.onclick = () => stepMonth(1);
 
     document.getElementById('full-region-month-title').textContent = `${evalData.region.month} ・ ${themeInfo.name}`;
-    document.getElementById('full-region-badge').textContent = `${statusBadge} (${curIdx + 1}/${orderedRegions.length})`;
+    const fullBadgeEl = document.getElementById('full-region-badge');
+    if (fullBadgeEl) {
+      fullBadgeEl.textContent = statusBadge;
+      fullBadgeEl.className = `absolute right-0 top-1/2 -translate-y-1/2 text-xs px-2 py-0.5 rounded-full font-semibold ${isArchived ? 'bg-[#2b5e4e]/15 text-[#1d4237]' : 'bg-[#2b5e4e] text-[#fffdf8]'}`;
+    }
+    const fullTipEl = document.getElementById('full-region-tip');
+    if (fullTipEl) {
+      fullTipEl.classList.toggle('hidden', isArchived);
+    }
     document.getElementById('full-region-subinfo').innerHTML = `
       <span class="inline-flex items-center gap-1">${icon('sparkles', 'w-3.5 h-3.5 text-[#df8a2b]')}美觀度 ${evalData.beauty}</span>
       <span>・</span>
