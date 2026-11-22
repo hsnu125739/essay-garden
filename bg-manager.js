@@ -134,32 +134,44 @@ const CSS_RULES = `
 
   /* 雨後彩虹 18秒天氣循環 */
   @keyframes rainPhaseControl {
-    0%, 35% { opacity: 0.95; transform: translateY(0); }
-    45% { opacity: 0.7; }
-    55%, 82% { opacity: 0.55; transform: translateY(10px); }
-    92%, 100% { opacity: 0.95; transform: translateY(0); }
+    0%, 38.89% {
+      opacity: 0.95;
+      transform: translateY(0);
+    }
+    50% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    77.77% {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    77.78%, 100% {
+      opacity: 0.95;
+      transform: translateY(0);
+    }
   }
   .anim-rain-weather-cycle { animation: rainPhaseControl 18s ease-in-out infinite; }
 
   /* 彩虹展開與結束動畫：從左向右展開，結束時「漸淡到全透明」且同時「從左至右」消失 (時長一樣) */
   @keyframes rainbowRevealDeep {
-    0%, 46% {
+    0%, 44.44% {
       opacity: 0;
       clip-path: polygon(0 0, 0% 0, 0% 100%, 0 100%);
     }
-    47% {
+    45% {
       opacity: 0.15;
-      clip-path: polygon(0 0, 8% 0, 8% 100%, 0 100%);
+      clip-path: polygon(0 0, 5% 0, 5% 100%, 0 100%);
     }
-    60% {
+    58% {
       opacity: 0.95;
       clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
     }
-    78% {
+    77.77% {
       opacity: 0.95;
       clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
     }
-    96% {
+    94% {
       opacity: 0;
       clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%);
     }
@@ -182,8 +194,8 @@ const CSS_RULES = `
   }
   #app-container[data-screen="home"] .rainbow-stage-wrapper,
   body[data-screen="home"] .rainbow-stage-wrapper {
-    top: 48% !important;
-    transform: translateX(-50%) scale(0.68) !important;
+    top: calc(48% - 30px) !important;
+    transform: translateX(-50%) scale(0.80) !important;
   }
 
   .anim-rainbow-deep { animation: rainbowRevealDeep 18s cubic-bezier(0.35, 0, 0.25, 1) infinite; }
