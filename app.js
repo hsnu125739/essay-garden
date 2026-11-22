@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122c';
+} from './engine.js?v=20261122d';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122c';
-import { CloudGardenStore } from './cloud-store.js?v=20261122c';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122c';
-import { bgManager } from './bg-manager.js?v=20261122c';
+} from './store.js?v=20261122d';
+import { CloudGardenStore } from './cloud-store.js?v=20261122d';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122d';
+import { bgManager } from './bg-manager.js?v=20261122d';
 
-const ASSET_VER = '20261122c';
+const ASSET_VER = '20261122d';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -945,16 +945,17 @@ function formatEssayTime(ts) {
 }
 
 function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = false }) {
-  const isMine = e.authorUid === uid;
+  const isDemo = e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome' || Boolean(e.isDemo);
+  const isMine = !isDemo && e.authorUid === uid;
   const isToday = e.dayKey === todayKey;
   const isYesterday = e.dayKey === addDays(todayKey, -1);
   const subLabel = compact ? formatEssayTime(e.createdAt) : (isToday ? '今天' : (isYesterday ? '昨天' : e.dayKey.slice(5)));
-  const resolvedAuthor = (typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人';
+  const resolvedAuthor = isDemo ? (e.authorName || '美地嚮導') : ((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人');
   const authorLabel = isMine ? '我' : resolvedAuthor;
-  const avatarChar = Array.from((isMine ? user.displayName : resolvedAuthor) || authorLabel)[0] || '我';
-  const avatarCls = isMine
+  const avatarChar = isDemo ? '美' : (Array.from((isMine ? user.displayName : resolvedAuthor) || authorLabel)[0] || '我');
+  const avatarCls = isDemo
     ? 'bg-[#2b5e4e] text-[#fffdf8]'
-    : 'bg-[#df8a2b]/20 text-[#9a5210] border border-[#df8a2b]/35';
+    : (isMine ? 'bg-[#2b5e4e] text-[#fffdf8]' : 'bg-[#df8a2b]/20 text-[#9a5210] border border-[#df8a2b]/35');
   const { myReaction } = getEssayReactionSummary(e, uid);
   const footerRight = (isGroup && e.private)
     ? `<span class="text-[#786b5e]/80 shrink-0" title="私密隨筆">${icon('lock', 'w-3.5 h-3.5')}</span>`
@@ -974,7 +975,7 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
       <span class="flex items-center justify-between gap-1 w-full pt-1.5 mt-1 border-t border-[#d8cbb8]/55 text-xs">
         <span class="flex items-center gap-1 min-w-0">
           <span class="w-5 h-5 rounded-full ${avatarCls} text-xs font-bold flex items-center justify-center shrink-0">${escapeHtml(avatarChar)}</span>
-          <span class="font-bold ${!compact && isToday ? 'text-[#2b5e4e]' : 'text-[#382e26]'} truncate">${escapeHtml(authorLabel)}・${subLabel}</span>
+          <span class="font-bold text-[11px] leading-tight ${!compact && isToday ? 'text-[#2b5e4e]' : 'text-[#382e26]'} truncate">${escapeHtml(authorLabel)}・${subLabel}</span>
         </span>
         ${footerRight}
       </span>
@@ -1739,7 +1740,7 @@ function renderModal() {
       ? ''
       : `<button type="button" data-react-btn="${e.id}" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center justify-center gap-1 min-w-[52px] px-2.5 py-1 rounded-full bg-[#f6f0e4] border border-[#e5dec9] transition">${renderReactionBtnInner(e, uid)}</button>`;
     const authorDisplayName = isDemo
-      ? (user?.displayName || '我')
+      ? '美地嚮導'
       : ((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人');
 
     box.innerHTML = `
@@ -1756,6 +1757,7 @@ function renderModal() {
           <div class="flex items-center justify-between gap-2 text-xs pt-1">
             <div class="flex items-center gap-2">
               ${modalReactBtnHtml}
+              <span class="text-xs text-[#786b5e] select-none">&lt;-長按可以選擇不同回應</span>
             </div>
           </div>
         ` : (isMine ? `

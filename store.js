@@ -12,7 +12,7 @@ import {
   evaluatePlantState,
   calculateBeauty,
   resolveGroupThemeVote
-} from './engine.js?v=20261122c';
+} from './engine.js?v=20261122d';
 
 export const DEMO_ESSAY_ID = 'essay_demo_welcome';
 export const DEMO_CARD_STYLE_KEY = 'essay_garden_demo_card_style_v1';
@@ -55,13 +55,13 @@ export function saveDemoEssayReactions(reactions) {
 
 export function buildDemoWelcomeEssay(uid, displayName, todayKey, regionId = '') {
   const yesterdayKey = addDays(todayKey, -1);
-  const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
+  const welcomeContent = '歡迎來到美地隨筆！每則隨筆寫滿 10 字以上即可抽種子；將種子栽種在島上，讓它們伴隨著你一同成長！累積能量還能解鎖裝飾、新背景以及擴建島嶼，一起記錄生活微光、經營美地！';
   const createdAt = new Date(`${yesterdayKey}T20:00:00`).getTime() || (Date.now() - 86400000);
   return {
     id: DEMO_ESSAY_ID,
     isDemo: true,
-    authorUid: uid,
-    authorName: displayName || '我',
+    authorUid: 'guide_meidi',
+    authorName: '美地嚮導',
     regionId: regionId || '',
     dayKey: yesterdayKey,
     content: welcomeContent,
