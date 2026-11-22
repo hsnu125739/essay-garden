@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>隨筆花園 Essay Garden</title>
   <link rel="manifest" href="./manifest.json" />
   <script src="https://cdn.tailwindcss.com"></script>
@@ -20,6 +20,13 @@
       --text-cocoa: #382e26;
       --text-muted: #786b5e;
       --accent-amber: #df8a2b;
+    }
+    html, body {
+      height: 100%;
+      height: 100vh;
+      height: 100dvh;
+      overflow: hidden;
+      overscroll-behavior: none;
     }
     body {
       background: linear-gradient(180deg, #b8e2d9 0%, #d8f0e8 48%, #eef7f1 100%);
@@ -213,11 +220,37 @@
       margin-bottom: -16px;
     }
     #full-garden-viewport svg { touch-action: none; }
+    #app-container {
+      height: 100%;
+      height: 100vh;
+      height: 100dvh;
+      max-height: 100dvh;
+    }
+    #screen-home {
+      padding-top: max(12px, env(safe-area-inset-top, 0px));
+    }
+    #screen-garden > header, #screen-essays > header {
+      padding-top: max(12px, env(safe-area-inset-top, 0px));
+    }
+    #home-floating-info {
+      bottom: calc(12px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+    #garden-bottom-nav {
+      padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)) !important;
+    }
+    #modal-overlay {
+      height: 100%;
+      height: 100vh;
+      height: 100dvh;
+      max-height: 100dvh;
+      padding-top: max(12px, env(safe-area-inset-top, 0px));
+      padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    }
   </style>
 </head>
-<body class="min-h-screen antialiased select-none flex justify-center">
+<body class="h-full h-screen h-[100dvh] antialiased select-none flex justify-center overflow-hidden">
   <!-- 手機直式主容器（內含柔和動態天候與背景） -->
-  <div id="app-container" class="w-full max-w-md min-h-screen flex flex-col relative overflow-hidden transition-all duration-700 bg-theme-morning">
+  <div id="app-container" class="w-full max-w-md h-full h-screen h-[100dvh] max-h-[100dvh] flex flex-col relative overflow-hidden transition-all duration-700 bg-theme-morning">
 
     <!-- 後景動態層（小島與卡片背後，z-0） -->
     <div id="dynamic-bg-layer" class="pointer-events-none absolute inset-0 overflow-hidden" style="z-index: 0;"></div>
@@ -344,7 +377,7 @@
     </main>
 
     <!-- ==================== 所有隨筆頁（按月份呈現，依日期由新到舊每日一列，每列可左右滑動，同屏約顯示 3 列） ==================== -->
-    <main id="screen-essays" class="hidden z-10 flex-1 flex flex-col h-screen max-h-screen overflow-hidden relative">
+    <main id="screen-essays" class="hidden z-10 flex-1 flex flex-col h-full max-h-full h-[100dvh] max-h-[100dvh] overflow-hidden relative">
       <header class="shrink-0 relative z-30 px-3 py-3 bg-[#fffdf8]/85 backdrop-blur border-b border-[#e5dec9] flex items-center justify-between gap-2 text-xs">
         <button type="button" id="btn-essays-back-home" title="返回首頁" aria-label="返回首頁" class="shrink-0 w-8 h-8 rounded-xl cozy-pill text-[#382e26] flex items-center justify-center hover:bg-white active:scale-95 transition"></button>
         <div class="flex-1 min-w-0 flex items-center justify-center gap-1.5">
@@ -366,6 +399,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261122p"></script>
+  <script type="module" src="./app.js?v=20261122q"></script>
 </body>
 </html>
