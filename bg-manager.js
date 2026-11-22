@@ -1281,24 +1281,24 @@ export class BgManager {
       </div>
     `).join('');
 
-    // 前景層 (z-25)：隨機 1/3 (6 條) 細緻雨絲飄落在島嶼前方，粗細與後景一致 (2.2px)，通透柔和
+    // 前景層 (z-25)：琳大花風格夢幻柔焦彩虹弧（移至前景層，飄過浮空島前方） + 1/3 (6 條) 細緻雨絲
     this.adapter.setForeHtml(`
-      <div class="anim-rain-weather-cycle absolute inset-0 pointer-events-none">
-        ${renderTracksHtml(foreTracks, true)}
-      </div>
-    `);
-
-    // 後景層 (z-0)：置中彩虹（天幕高度適當） + 雲隙斜光束 + 水氣光斑 + 2/3 (12 條) 細緻雨絲
-    this.adapter.setBackHtml(`
-      <!-- 琳大花風格雲隙斜光束 (God Rays) -->
-      ${makeGodRaysSvg()}
-
-      <!-- 琳大花風格夢幻柔焦彩虹弧（外層響應首頁島嶼或全螢幕動態定位與縮放，內層專責展開/淡出，切換瞬間無縫維持動畫播放） -->
+      <!-- 琳大花風格夢幻柔焦彩虹弧（移至前景層 z-25，飄過小島前方） -->
       <div id="rainbow-stage-container" class="rainbow-stage-wrapper pointer-events-none">
         <div class="anim-rainbow-deep w-full">
           ${makeExactMathRainbowSvg()}
         </div>
       </div>
+
+      <div class="anim-rain-weather-cycle absolute inset-0 pointer-events-none">
+        ${renderTracksHtml(foreTracks, true)}
+      </div>
+    `);
+
+    // 後景層 (z-0)：雲隙斜光束 + 水氣光斑 + 2/3 (12 條) 細緻雨絲
+    this.adapter.setBackHtml(`
+      <!-- 琳大花風格雲隙斜光束 (God Rays) -->
+      ${makeGodRaysSvg()}
 
       <!-- 發光水氣光斑 (Sunlit Moisture Bokeh) -->
       ${makeMoistureBokehHtml()}
