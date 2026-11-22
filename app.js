@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122z';
+} from './engine.js?v=20261123a';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122z';
-import { CloudGardenStore } from './cloud-store.js?v=20261122z';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122z';
-import { bgManager } from './bg-manager.js?v=20261122z';
+} from './store.js?v=20261123a';
+import { CloudGardenStore } from './cloud-store.js?v=20261123a';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123a';
+import { bgManager } from './bg-manager.js?v=20261123a';
 
-const ASSET_VER = '20261122z';
+const ASSET_VER = '20261123a';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -407,29 +407,44 @@ function openReactionTray(btnEl, essay) {
   if (!trayEl) return;
 
   const cardEl = btnEl.closest('.essay-card');
-  const trayWidth = cardEl ? Math.max(150, Math.round(cardEl.getBoundingClientRect().width)) : 160;
+  const isModal = Boolean(btnEl.closest('#modal-box') || btnEl.closest('#modal-overlay'));
+
+  // 1. 托盤尺寸與表情排列順序：
+  // 編輯頁面 (isModal)：托盤較大（按鈕 36x36），表情順序由左至右為 [love, cheer, hug, sprout, sparkle]，愛心在最左邊對齊實際表情位置
+  // 首頁隨筆卡片：托盤適應卡片寬度（按鈕 27x27），表情為 [sparkle, sprout, hug, cheer, love]，愛心在最右邊對齊卡片右下角
+  const isLeftAligned = isModal || (btnEl.getBoundingClientRect().left < window.innerWidth / 2);
+  const reactionList = isLeftAligned ? [...REACTIONS].reverse() : REACTIONS;
+  const optSizeCls = isModal ? 'w-[36px] h-[36px]' : 'w-[27px] h-[27px]';
+  const iconCls = isModal ? 'w-6 h-6' : 'w-[18px] h-[18px]';
+  const labelCls = isModal ? 'text-xs -top-7' : 'text-[10px] -top-6';
+
+  const trayWidth = isModal ? 236 : (cardEl ? Math.max(150, Math.round(cardEl.getBoundingClientRect().width)) : 160);
   trayEl.style.width = `${trayWidth}px`;
 
-  trayEl.innerHTML = REACTIONS.map(r => `
+  trayEl.innerHTML = reactionList.map(r => `
     <button type="button" role="menuitem" data-reaction-opt="${r.id}" data-hovered="false" aria-label="${r.label}"
-      class="reaction-opt relative w-[27px] h-[27px] rounded-full flex items-center justify-center shrink-0 focus:outline-none"
+      class="reaction-opt relative ${optSizeCls} rounded-full flex items-center justify-center shrink-0 focus:outline-none"
       style="background:${r.bg};color:${r.color}">
-      <span data-opt-label class="pointer-events-none absolute -top-6 left-1/2 px-1.5 py-0.5 rounded-full bg-[#1d4237] text-[#fffdf8] text-[10px] font-bold whitespace-nowrap shadow-sm">${r.label}</span>
-      ${icon(r.iconName, 'w-[18px] h-[18px]')}
+      <span data-opt-label class="pointer-events-none absolute ${labelCls} left-1/2 px-1.5 py-0.5 rounded-full bg-[#1d4237] text-[#fffdf8] font-bold whitespace-nowrap shadow-sm">${r.label}</span>
+      ${icon(r.iconName, iconCls)}
     </button>
   `).join('');
 
-  // 先移除動畫取得未縮放精準寬度與愛心偏移量，再套用入場動畫與預設跳起愛心
+  // 先移除動畫取得未縮放精準寬度，再套用入場動畫與預設跳起愛心
   trayEl.classList.remove('hidden', 'reaction-tray-in');
 
   const btnRect = btnEl.getBoundingClientRect();
-  const trayRect = trayEl.getBoundingClientRect();
-  const loveOpt = trayEl.querySelector('[data-reaction-opt="love"]');
-  const loveRect = loveOpt ? loveOpt.getBoundingClientRect() : null;
-  const loveCenterOffset = loveRect ? (loveRect.left + loveRect.width / 2 - trayRect.left) : trayRect.width - 20;
+  const targetIcon = btnEl.querySelector('svg') || btnEl;
+  const targetRect = targetIcon.getBoundingClientRect();
+  const targetCenterX = targetRect.left + targetRect.width / 2;
 
-  const left = Math.max(8, Math.min(window.innerWidth - trayRect.width - 8, (btnRect.left + btnRect.width / 2) - loveCenterOffset));
-  const top = Math.max(36, btnRect.top - trayRect.height - 10);
+  // 純粹幾何常數對齊：完全不受 CSS scale(1.42) 動態放大影響
+  // 編輯頁面 (isLeftAligned): 左側 padding 10px + 按鈕半寬 18px = 28px，精準對齊實際顯示之愛心圖標中心
+  // 首頁卡片 (右側對齊): trayWidth - 右側 padding 6px - 按鈕半寬 13.5px = trayWidth - 19.5px
+  const loveCenterOffset = isLeftAligned ? 28 : (trayWidth - 19.5);
+
+  const left = Math.max(8, Math.min(window.innerWidth - trayWidth - 8, targetCenterX - loveCenterOffset));
+  const top = Math.max(36, btnRect.top - (isModal ? 52 : 38) - 8);
   trayEl.style.left = `${left.toFixed(1)}px`;
   trayEl.style.top = `${top.toFixed(1)}px`;
 
@@ -1851,7 +1866,7 @@ function renderModal() {
           <div class="flex items-center justify-between gap-2 text-xs pt-1">
             <div class="flex items-center gap-2">
               ${modalReactBtnHtml}
-              <span class="text-xs text-[#786b5e] select-none">&lt;-長按可以選擇不同回應</span>
+              <span class="text-xs text-[#786b5e] select-none">← 長按可以選擇不同回應</span>
             </div>
           </div>
         ` : (isMine ? `
@@ -1867,6 +1882,7 @@ function renderModal() {
                   <span>私密隨筆</span>
                 </label>` : ''}
               ${modalReactBtnHtml}
+              <span class="text-xs text-[#786b5e] select-none">← 長按可以選擇不同回應</span>
             </div>
             <button type="button" id="btn-save-essay" class="px-4 py-2 rounded-xl bg-[#2b5e4e] text-[#fffdf8] font-semibold">儲存修改（不重算獎勵）</button>
           </div>
