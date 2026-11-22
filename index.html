@@ -175,13 +175,22 @@
     .memo-text {
       display: -webkit-box;
       -webkit-box-orient: vertical;
-      -webkit-line-clamp: 7;
+      -webkit-line-clamp: 5;
       overflow: hidden;
       white-space: pre-wrap;
       word-break: break-word;
       text-align: justify;
       text-justify: inter-ideograph;
       text-align-last: left;
+    }
+    @media (min-height: 676px) {
+      .memo-text { -webkit-line-clamp: 6; }
+    }
+    @media (min-height: 738px) {
+      .memo-text { -webkit-line-clamp: 7; }
+    }
+    @media (min-height: 800px) {
+      .memo-text { -webkit-line-clamp: 8; }
     }
     .memo-text-compact {
       display: -webkit-box;
@@ -361,6 +370,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261122i"></script>
+  <script type="module" src="./app.js?v=20261122j"></script>
 </body>
 </html>
