@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261123a';
+} from './engine.js?v=20261123b';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261123a';
-import { CloudGardenStore } from './cloud-store.js?v=20261123a';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123a';
-import { bgManager } from './bg-manager.js?v=20261123a';
+} from './store.js?v=20261123b';
+import { CloudGardenStore } from './cloud-store.js?v=20261123b';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123b';
+import { bgManager } from './bg-manager.js?v=20261123b';
 
-const ASSET_VER = '20261123a';
+const ASSET_VER = '20261123b';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -410,10 +410,9 @@ function openReactionTray(btnEl, essay) {
   const isModal = Boolean(btnEl.closest('#modal-box') || btnEl.closest('#modal-overlay'));
 
   // 1. 托盤尺寸與表情排列順序：
-  // 編輯頁面 (isModal)：托盤較大（按鈕 36x36），表情順序由左至右為 [love, cheer, hug, sprout, sparkle]，愛心在最左邊對齊實際表情位置
-  // 首頁隨筆卡片：托盤適應卡片寬度（按鈕 27x27），表情為 [sparkle, sprout, hug, cheer, love]，愛心在最右邊對齊卡片右下角
-  const isLeftAligned = isModal || (btnEl.getBoundingClientRect().left < window.innerWidth / 2);
-  const reactionList = isLeftAligned ? [...REACTIONS].reverse() : REACTIONS;
+  // 編輯頁面 (isModal): 托盤較大（按鈕 36x36），表情順序由左至右為 [love, cheer, hug, sprout, sparkle]，愛心在最左邊對齊按鈕
+  // 首頁隨筆卡片 (!isModal): 托盤適應卡片寬度（按鈕 27x27），表情順序由右至左（最右端為愛心，陣列為 [sparkle, sprout, hug, cheer, love]），愛心在最右邊對齊卡片右下角
+  const reactionList = isModal ? [...REACTIONS].reverse() : REACTIONS;
   const optSizeCls = isModal ? 'w-[36px] h-[36px]' : 'w-[27px] h-[27px]';
   const iconCls = isModal ? 'w-6 h-6' : 'w-[18px] h-[18px]';
   const labelCls = isModal ? 'text-xs -top-7' : 'text-[10px] -top-6';
@@ -439,9 +438,9 @@ function openReactionTray(btnEl, essay) {
   const targetCenterX = targetRect.left + targetRect.width / 2;
 
   // 純粹幾何常數對齊：完全不受 CSS scale(1.42) 動態放大影響
-  // 編輯頁面 (isLeftAligned): 左側 padding 10px + 按鈕半寬 18px = 28px，精準對齊實際顯示之愛心圖標中心
-  // 首頁卡片 (右側對齊): trayWidth - 右側 padding 6px - 按鈕半寬 13.5px = trayWidth - 19.5px
-  const loveCenterOffset = isLeftAligned ? 28 : (trayWidth - 19.5);
+  // 編輯頁面 (isModal): 愛心在最左邊，左側 padding 10px + 按鈕半寬 18px = 28px，精準對齊實際顯示之愛心圖標中心
+  // 首頁卡片 (!isModal): 愛心在最右邊，trayWidth - 右側 padding 6px - 按鈕半寬 13.5px = trayWidth - 19.5px，精準對齊卡片右下角愛心圖標中心
+  const loveCenterOffset = isModal ? 28 : (trayWidth - 19.5);
 
   const left = Math.max(8, Math.min(window.innerWidth - trayWidth - 8, targetCenterX - loveCenterOffset));
   const top = Math.max(36, btnRect.top - (isModal ? 52 : 38) - 8);
