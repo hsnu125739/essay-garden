@@ -8,7 +8,7 @@ import threading
 from playwright.sync_api import sync_playwright
 
 ROOT_DIR = r"d:\Antigravity workspaces\交通美地"
-ASSET_VER = "20261122t"
+ASSET_VER = "20261122u"
 
 
 def load_text(name):

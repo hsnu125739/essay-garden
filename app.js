@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122t';
+} from './engine.js?v=20261122u';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122t';
-import { CloudGardenStore } from './cloud-store.js?v=20261122t';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122t';
-import { bgManager } from './bg-manager.js?v=20261122t';
+} from './store.js?v=20261122u';
+import { CloudGardenStore } from './cloud-store.js?v=20261122u';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122u';
+import { bgManager } from './bg-manager.js?v=20261122u';
 
-const ASSET_VER = '20261122t';
+const ASSET_VER = '20261122u';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -785,7 +785,7 @@ function clampIslandPan(containerEl, svgEl, px, py, z, { topPadPx = ISLAND_FULL_
   // b：往上移動不可碰到上方橫幅或隨筆區並保持恰當距離（若深度放大導致草地本身高於視口，允許上移至底部草地恰好進入視口）
   const minPyTop = (stageTop + topPadPx / scale) - z * islandTop;
   const minPyBot = (stageBottom - ISLAND_BOT_PAD_PX / scale) - z * grassBottom;
-  const minPy = Math.min(maxPy, Math.min(minPyTop, minPyBot));
+  const minPy = Math.min(0, Math.min(maxPy, Math.min(minPyTop, minPyBot)));
   const rawY = Math.max(minPy, Math.min(maxPy, py));
   const y = rawY === 0 ? 0 : rawY;
 
@@ -835,13 +835,19 @@ function alignFullIslandViewBox(regionSize) {
 
   const scale = Math.min(sr.width / FULL_VB_W, sr.height / FULL_VB_H);
   const winH = window.innerHeight;
-  const targetScreenY = winH / 2 + 50; // 原則：花園島圖片中心高度 = 視窗中心高度下方 50px
+  const navEl = document.getElementById('garden-bottom-nav');
+  const navTop = navEl ? navEl.getBoundingClientRect().top : winH - 65;
 
   const islandScale = (regionSize || BASE_GRID_N) / BASE_GRID_N;
   const centerLocalY = -175 * islandScale + 205 * islandScale;
-
+  const islBottomY = -175 * islandScale + 410 * islandScale;
   const svgBaseCenterY = sr.top + sr.height / 2;
-  const vbCy = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
+
+  // 原則：調低島嶼位置消除偏高感；保護底線：泥土尖端絕不插入最下方選單（距選單頂部至少保留 20px 淨空）
+  const targetScreenY = winH / 2 + 105;
+  const vbCyTarget = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
+  const vbCyMin = islBottomY - ((navTop - 32) - svgBaseCenterY) / scale;
+  const vbCy = Math.max(vbCyTarget, vbCyMin);
   const vbY = vbCy - FULL_VB_H / 2;
   fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
 }
