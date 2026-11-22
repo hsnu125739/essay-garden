@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122r';
+} from './engine.js?v=20261122s';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122r';
-import { CloudGardenStore } from './cloud-store.js?v=20261122r';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122r';
-import { bgManager } from './bg-manager.js?v=20261122r';
+} from './store.js?v=20261122s';
+import { CloudGardenStore } from './cloud-store.js?v=20261122s';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122s';
+import { bgManager } from './bg-manager.js?v=20261122s';
 
-const ASSET_VER = '20261122r';
+const ASSET_VER = '20261122s';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -3091,6 +3091,7 @@ async function boot() {
 
   window.__store = store;
   window.__bgManager = bgManager;
+  window.__renderApp = renderApp;
 
   // 首屏立即渲染（若有 localStorage 快取則 < 300ms 秒開首繪，無須等待 GAS 回應）
   renderApp();

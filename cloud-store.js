@@ -7,9 +7,9 @@ import {
   getStreakMultiplier,
   evaluatePlantState,
   calculateBeauty
-} from './engine.js?v=20261122r';
-import { createMemoryStorage, DEMO_ESSAY_ID, buildDemoWelcomeEssay } from './store.js?v=20261122r';
-import { CloudClient, SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122r';
+} from './engine.js?v=20261122s';
+import { createMemoryStorage, DEMO_ESSAY_ID, buildDemoWelcomeEssay } from './store.js?v=20261122s';
+import { CloudClient, SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122s';
 
 export const CLOUD_STATE_STORAGE_KEY = 'essay_garden_state_v4';
 export const CARD_STYLE_STORAGE_KEY = 'essay_garden_card_style_v1';
