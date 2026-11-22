@@ -142,18 +142,18 @@ const CSS_RULES = `
       opacity: 0;
       transform: translateY(6px);
     }
-    77.77% {
+    94.43% {
       opacity: 0;
       transform: translateY(6px);
     }
-    77.78%, 100% {
+    94.44%, 100% {
       opacity: 0.95;
       transform: translateY(0);
     }
   }
   .anim-rain-weather-cycle { animation: rainPhaseControl 18s ease-in-out infinite; }
 
-  /* 彩虹展開與結束動畫：從左向右展開，結束時「漸淡到全透明」且同時「從左至右」消失 (時長一樣) */
+  /* 彩虹展開與結束動畫：從左向右展開，結束時先淡出，再從左至右消失 */
   @keyframes rainbowRevealDeep {
     0%, 44.44% {
       opacity: 0;
@@ -167,11 +167,15 @@ const CSS_RULES = `
       opacity: 0.95;
       clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
     }
-    77.77% {
+    75% {
       opacity: 0.95;
       clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
     }
-    94% {
+    81% {
+      opacity: 0.55;
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+    }
+    94.44% {
       opacity: 0;
       clip-path: polygon(100% 0, 100% 0, 100% 100%, 100% 100%);
     }
