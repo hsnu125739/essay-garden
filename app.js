@@ -6,13 +6,22 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122b';
-import { GardenStore } from './store.js?v=20261122b';
-import { CloudGardenStore } from './cloud-store.js?v=20261122b';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122b';
-import { bgManager } from './bg-manager.js?v=20261122b';
+} from './engine.js?v=20261122c';
+import {
+  GardenStore,
+  DEMO_ESSAY_ID,
+  DEMO_CARD_STYLE_KEY,
+  DEMO_REACTIONS_KEY,
+  getDemoEssayCardStyle,
+  saveDemoEssayCardStyle,
+  getDemoEssayReactions,
+  saveDemoEssayReactions
+} from './store.js?v=20261122c';
+import { CloudGardenStore } from './cloud-store.js?v=20261122c';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122c';
+import { bgManager } from './bg-manager.js?v=20261122c';
 
-const ASSET_VER = '20261122b';
+const ASSET_VER = '20261122c';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -352,6 +361,21 @@ function applyEssayReaction(essay, reactionId, sourceBtnEl = null) {
       updateReactionBtnUI(b, essay, uid, shouldAnimate);
     });
   };
+
+  const isDemo = essay.id === DEMO_ESSAY_ID || essay.id === 'essay_welcome' || Boolean(essay.isDemo);
+  if (isDemo) {
+    const demoReactions = getDemoEssayReactions();
+    if (demoReactions[uid] === reactionId) {
+      delete demoReactions[uid];
+    } else {
+      demoReactions[uid] = reactionId;
+    }
+    saveDemoEssayReactions(demoReactions);
+    essay.reactions = demoReactions;
+    syncBtns(true);
+    return;
+  }
+
   let res;
   try {
     res = store.setEssayReaction(essay.id, reactionId, uid, essay.dayKey, essay.authorUid);
@@ -923,7 +947,8 @@ function formatEssayTime(ts) {
 function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = false }) {
   const isMine = e.authorUid === uid;
   const isToday = e.dayKey === todayKey;
-  const subLabel = compact ? formatEssayTime(e.createdAt) : (isToday ? '今天' : e.dayKey.slice(5));
+  const isYesterday = e.dayKey === addDays(todayKey, -1);
+  const subLabel = compact ? formatEssayTime(e.createdAt) : (isToday ? '今天' : (isYesterday ? '昨天' : e.dayKey.slice(5)));
   const resolvedAuthor = (typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人';
   const authorLabel = isMine ? '我' : resolvedAuthor;
   const avatarChar = Array.from((isMine ? user.displayName : resolvedAuthor) || authorLabel)[0] || '我';
@@ -1703,8 +1728,9 @@ function renderModal() {
   // 3. 閱讀／編輯隨筆
   if (ui.activeModal === 'read_essay') {
     const e = ui.modalData;
-    const isMine = Boolean(e.authorUid) && e.authorUid === uid;
-    const isGroup = garden.type === 'group';
+    const isDemo = e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome' || Boolean(e.isDemo);
+    const isMine = (Boolean(e.authorUid) && e.authorUid === uid) || isDemo;
+    const isGroup = !isDemo && garden.type === 'group';
     const showPrivateLock = isGroup && e.private;
     let selectedCardId = resolveEssayCardStyle(e).id;
     const initCard = CARD_STYLE_MAP[selectedCardId];
@@ -1712,13 +1738,27 @@ function renderModal() {
     const modalReactBtnHtml = showPrivateLock
       ? ''
       : `<button type="button" data-react-btn="${e.id}" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center justify-center gap-1 min-w-[52px] px-2.5 py-1 rounded-full bg-[#f6f0e4] border border-[#e5dec9] transition">${renderReactionBtnInner(e, uid)}</button>`;
+    const authorDisplayName = isDemo
+      ? (user?.displayName || '我')
+      : ((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人');
+
     box.innerHTML = `
       <div class="space-y-3 max-h-[85vh] overflow-y-auto no-scrollbar">
         <div class="flex items-center justify-between">
-          <div class="text-xs text-[#786b5e]">${e.dayKey} ・ 作者：<span class="font-bold text-[#382e26]">${escapeHtml((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人')}</span> (<span id="edit-word-count">${countEssayWords(e.content)}</span> 字)</div>
+          <div class="text-xs text-[#786b5e]">${e.dayKey} ・ 作者：<span class="font-bold text-[#382e26]">${escapeHtml(authorDisplayName)}</span> (<span id="edit-word-count">${countEssayWords(e.content)}</span> 字)</div>
           <button type="button" id="modal-close" class="text-[#786b5e] text-xs font-semibold px-2 py-1">關閉</button>
         </div>
-        ${isMine ? `
+        ${isDemo ? `
+          ${renderCardPickerHtml(selectedCardId)}
+          <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-5" style="${memoStyleAttr(initCard)}">
+            <div class="whitespace-pre-wrap leading-relaxed select-text text-sm text-[#382e26] min-h-[96px]">${escapeHtml(e.content)}</div>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-xs pt-1">
+            <div class="flex items-center gap-2">
+              ${modalReactBtnHtml}
+            </div>
+          </div>
+        ` : (isMine ? `
           ${renderCardPickerHtml(selectedCardId)}
           <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-5" style="${memoStyleAttr(initCard)}">
             <textarea id="edit-essay-text" rows="5" class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text">${escapeHtml(e.content)}</textarea>
@@ -1737,11 +1777,25 @@ function renderModal() {
         ` : `
           <div class="memo-note w-full pt-[26%] pb-[12%] px-5 text-sm text-[#382e26]" style="${memoStyleAttr(initCard)}"><p class="whitespace-pre-wrap leading-relaxed select-text">${escapeHtml(e.content)}</p></div>
           ${!showPrivateLock ? `<div class="flex items-center justify-between text-xs text-[#5c5046] pt-1"><span class="select-none">給予心情反應（長按可選更多）</span>${modalReactBtnHtml}</div>` : ''}
-        `}
+        `)}
       </div>`;
     const modalReactBtn = box.querySelector('[data-react-btn]');
     if (modalReactBtn) bindReactionTrigger(modalReactBtn, e);
-    if (isMine) {
+    if (isDemo) {
+      bindCardPicker(box, document.getElementById('edit-memo-wrap'), selectedCardId, (id) => {
+        selectedCardId = id;
+        saveDemoEssayCardStyle(id);
+        e.cardStyle = id;
+        const homeCardEl = document.querySelector(`.essay-card[data-essay-id="${e.id}"]`);
+        if (homeCardEl) {
+          const c = CARD_STYLE_MAP[id];
+          if (c) {
+            homeCardEl.style.setProperty('--memo-bg', c.bg);
+            homeCardEl.style.setProperty('--memo-img', `url("./assets/card/${c.id}.png?v=${ASSET_VER}")`);
+          }
+        }
+      });
+    } else if (isMine) {
       bindCardPicker(box, document.getElementById('edit-memo-wrap'), selectedCardId, (id) => {
         selectedCardId = id;
         savePreferredCardStyle(id);

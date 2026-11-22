@@ -12,7 +12,67 @@ import {
   evaluatePlantState,
   calculateBeauty,
   resolveGroupThemeVote
-} from './engine.js?v=20261122b';
+} from './engine.js?v=20261122c';
+
+export const DEMO_ESSAY_ID = 'essay_demo_welcome';
+export const DEMO_CARD_STYLE_KEY = 'essay_garden_demo_card_style_v1';
+export const DEMO_REACTIONS_KEY = 'essay_garden_demo_reactions_v1';
+
+export function getDemoEssayCardStyle() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem(DEMO_CARD_STYLE_KEY) || 'card2';
+    }
+  } catch (e) {}
+  return 'card2';
+}
+
+export function saveDemoEssayCardStyle(styleId) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DEMO_CARD_STYLE_KEY, styleId);
+    }
+  } catch (e) {}
+}
+
+export function getDemoEssayReactions() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(DEMO_REACTIONS_KEY);
+      return raw ? JSON.parse(raw) : {};
+    }
+  } catch (e) {}
+  return {};
+}
+
+export function saveDemoEssayReactions(reactions) {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(DEMO_REACTIONS_KEY, JSON.stringify(reactions || {}));
+    }
+  } catch (e) {}
+}
+
+export function buildDemoWelcomeEssay(uid, displayName, todayKey, regionId = '') {
+  const yesterdayKey = addDays(todayKey, -1);
+  const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
+  const createdAt = new Date(`${yesterdayKey}T20:00:00`).getTime() || (Date.now() - 86400000);
+  return {
+    id: DEMO_ESSAY_ID,
+    isDemo: true,
+    authorUid: uid,
+    authorName: displayName || '我',
+    regionId: regionId || '',
+    dayKey: yesterdayKey,
+    content: welcomeContent,
+    wordCount: countEssayWords(welcomeContent),
+    private: false,
+    cardStyle: getDemoEssayCardStyle(),
+    reactions: getDemoEssayReactions(),
+    createdAt,
+    updatedAt: createdAt
+  };
+}
 
 const STORAGE_KEY = 'essay_garden_state_v4';
 
@@ -79,23 +139,8 @@ export class GardenStore {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.users && parsed.gardens && parsed.currentUserId && parsed.users[parsed.currentUserId]) {
           for (const g of Object.values(parsed.gardens || {})) {
-            if (Array.isArray(g.essays) && g.essays.some(e => String(e.id || '').startsWith('essay_demo'))) {
-              const todayKey = getGameDayKey(Date.now(), g.timezone || 'Asia/Taipei', this.config.dayBoundaryHour);
-              const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
-              g.essays = [{
-                id: 'essay_welcome',
-                authorUid: 'guide',
-                authorName: '花園嚮導',
-                regionId: g.activeRegionId,
-                dayKey: todayKey,
-                content: welcomeContent,
-                wordCount: countEssayWords(welcomeContent),
-                private: false,
-                cardStyle: 'card2',
-                reward: { type: 'seed', speciesId: 'fb_c1' },
-                createdAt: Date.now() - 3600000,
-                updatedAt: Date.now() - 3600000
-              }];
+            if (Array.isArray(g.essays)) {
+              g.essays = g.essays.filter(e => !String(e.id || '').startsWith('essay_demo') && e.id !== 'essay_welcome');
             }
           }
           return parsed;
@@ -333,26 +378,7 @@ export class GardenStore {
               }
             }
           },
-          essays: [
-            [0, '09:00', 'card2', 'fb_c1', '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！']
-          ].map(([dayOffset, time, cardStyle, speciesId, content]) => {
-            const dayKey = addDays(todayKey, -dayOffset);
-            const ts = new Date(`${dayKey}T${time}:00`).getTime();
-            return {
-              id: 'essay_welcome',
-              authorUid: 'guide',
-              authorName: '花園嚮導',
-              regionId: rid,
-              dayKey,
-              content,
-              wordCount: countEssayWords(content),
-              private: false,
-              cardStyle,
-              reward: { type: 'seed', speciesId },
-              createdAt: ts,
-              updatedAt: ts
-            };
-          })
+          essays: []
         }
       },
       invites: {}
@@ -454,11 +480,12 @@ export class GardenStore {
   // 取得首頁隨筆輪播（跨花園自己的所有隨筆 + 目前團體公開隨筆，依時間新到舊）
   getCarouselEssays() {
     const uid = this.state.currentUserId;
-    const activeGid = this.state.users[uid].activeGardenId;
+    const activeGid = this.state.users[uid]?.activeGardenId;
     const merged = new Map();
 
     for (const g of Object.values(this.state.gardens)) {
       for (const e of (g.essays || [])) {
+        if (e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome') continue;
         if (e.authorUid === uid) {
           merged.set(e.id, e);
         } else if (g.id === activeGid && !e.private) {
@@ -467,24 +494,13 @@ export class GardenStore {
       }
     }
 
-    if (merged.size === 0) {
+    // 示範隨筆寫死在前端，後端無資料；日期為昨天
+    if (!uid || !uid.startsWith('u_test_')) {
       const garden = this.state.gardens[activeGid] || Object.values(this.state.gardens)[0];
       const todayKey = this.currentDayKey(garden);
-      const welcomeContent = '歡迎來到隨筆花園！每天寫滿 10 字隨筆即可抽種子；在島上種下植物、連續簽到伴隨成長。累積能量還能解鎖裝飾與擴建島嶼，一起記錄生活微光！';
-      merged.set('essay_welcome', {
-        id: 'essay_welcome',
-        authorUid: 'guide',
-        authorName: '花園嚮導',
-        regionId: garden?.activeRegionId || '',
-        dayKey: todayKey,
-        content: welcomeContent,
-        wordCount: countEssayWords(welcomeContent),
-        private: false,
-        cardStyle: 'card2',
-        reward: { type: 'seed', speciesId: 'fb_c1' },
-        createdAt: Date.now() - 3600000,
-        updatedAt: Date.now() - 3600000
-      });
+      const user = this.state.users[uid];
+      const demoEssay = buildDemoWelcomeEssay(uid, user?.displayName, todayKey, garden?.activeRegionId);
+      merged.set(demoEssay.id, demoEssay);
     }
 
     return Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt);
