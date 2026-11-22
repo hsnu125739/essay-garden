@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122e';
+} from './engine.js?v=20261122f';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122e';
-import { CloudGardenStore } from './cloud-store.js?v=20261122e';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122e';
-import { bgManager } from './bg-manager.js?v=20261122e';
+} from './store.js?v=20261122f';
+import { CloudGardenStore } from './cloud-store.js?v=20261122f';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122f';
+import { bgManager } from './bg-manager.js?v=20261122f';
 
-const ASSET_VER = '20261122e';
+const ASSET_VER = '20261122f';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -962,15 +962,15 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
     : `<button type="button" data-react-btn="${e.id}" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center gap-0.5 shrink-0 py-0.5 -my-0.5 rounded-full transition">${renderReactionBtnInner(e, uid)}</button>`;
   const card = resolveEssayCardStyle(e);
   const sizeCls = compact
-    ? 'w-[42%] min-w-[150px] h-[clamp(152px,23vh,198px)] pt-11 pb-2.5 px-3'
-    : 'w-[45%] h-[clamp(196px,31vh,264px)] card-float pt-12 pb-3.5 px-4';
+    ? 'w-[42%] min-w-[150px] h-[clamp(152px,23vh,198px)] pt-11 pb-2.5 px-[17px]'
+    : 'w-[45%] h-[clamp(196px,31vh,264px)] card-float pt-12 pb-3.5 px-[17px]';
   const textCls = compact
-    ? 'memo-text-compact text-xs text-[#382e26] leading-snug whitespace-pre-wrap break-words'
-    : 'memo-text text-[13px] text-[#382e26] leading-[1.48] whitespace-pre-wrap break-words';
+    ? 'memo-text-compact text-xs text-[#382e26] leading-snug whitespace-pre-wrap break-words text-justify [text-align-last:left]'
+    : 'memo-text text-[13px] text-[#382e26] leading-[1.48] whitespace-pre-wrap break-words text-justify [text-align-last:left]';
   const floatStyle = compact ? '' : `animation-delay:${(idx % 3) * 1.1}s`;
 
   return `
-    <div role="button" tabindex="0" data-essay-id="${e.id}" style="${memoStyleAttr(card)}${floatStyle}" class="essay-card shrink-0 ${sizeCls} memo-note flex flex-col justify-between text-left cursor-pointer active:scale-[0.98] transition">
+    <div role="button" tabindex="0" data-essay-id="${e.id}" style="${memoStyleAttr(card)}${floatStyle}" class="essay-card shrink-0 ${sizeCls} memo-note flex flex-col justify-between cursor-pointer active:scale-[0.98] transition">
       <span class="flex-1 w-full overflow-hidden"><span class="${textCls}">${escapeHtml(e.content)}</span></span>
       <span class="flex items-center justify-between gap-1 w-full pt-1.5 mt-1 border-t border-[#d8cbb8]/55 text-xs">
         <span class="flex items-center gap-1 min-w-0">
@@ -1586,8 +1586,8 @@ function renderModal() {
             <button type="button" id="btn-editor-makeup" class="px-3 py-1 rounded-xl bg-[#df8a2b] text-white font-semibold shrink-0 ml-2">補寫 (${makeUp.cost} 能量)</button>
           </div>` : ''}
         ${renderCardPickerHtml(selectedCardId)}
-        <div id="editor-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-5" style="${memoStyleAttr(initCard)}">
-          <textarea id="essay-input" rows="4" placeholder="寫下今天的隨筆想法（至少 10 字即可獲得種子，字數越多稀有度越高）..." class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text"></textarea>
+        <div id="editor-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-[17px]" style="${memoStyleAttr(initCard)}">
+          <textarea id="essay-input" rows="4" placeholder="寫下今天的隨筆想法（至少 10 字即可獲得種子，字數越多稀有度越高）..." class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text text-justify [text-align-last:left]"></textarea>
         </div>
 
         <div class="bg-[#f6f0e4] rounded-2xl p-3 space-y-2 text-xs">
@@ -1751,8 +1751,8 @@ function renderModal() {
         </div>
         ${isDemo ? `
           ${renderCardPickerHtml(selectedCardId)}
-          <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-5" style="${memoStyleAttr(initCard)}">
-            <div class="whitespace-pre-wrap leading-relaxed select-text text-sm text-[#382e26] min-h-[96px]">${escapeHtml(e.content)}</div>
+          <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-[17px]" style="${memoStyleAttr(initCard)}">
+            <div class="whitespace-pre-wrap leading-relaxed select-text text-sm text-[#382e26] min-h-[96px] text-justify [text-align-last:left]">${escapeHtml(e.content)}</div>
           </div>
           <div class="flex items-center justify-between gap-2 text-xs pt-1">
             <div class="flex items-center gap-2">
@@ -1762,8 +1762,8 @@ function renderModal() {
           </div>
         ` : (isMine ? `
           ${renderCardPickerHtml(selectedCardId)}
-          <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-5" style="${memoStyleAttr(initCard)}">
-            <textarea id="edit-essay-text" rows="5" class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text">${escapeHtml(e.content)}</textarea>
+          <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-[17px]" style="${memoStyleAttr(initCard)}">
+            <textarea id="edit-essay-text" rows="5" class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text text-justify [text-align-last:left]">${escapeHtml(e.content)}</textarea>
           </div>
           <div class="flex items-center justify-between gap-2 text-xs pt-1">
             <div class="flex items-center gap-2">
@@ -1777,7 +1777,7 @@ function renderModal() {
             <button type="button" id="btn-save-essay" class="px-4 py-2 rounded-xl bg-[#2b5e4e] text-[#fffdf8] font-semibold">儲存修改（不重算獎勵）</button>
           </div>
         ` : `
-          <div class="memo-note w-full pt-[26%] pb-[12%] px-5 text-sm text-[#382e26]" style="${memoStyleAttr(initCard)}"><p class="whitespace-pre-wrap leading-relaxed select-text">${escapeHtml(e.content)}</p></div>
+          <div class="memo-note w-full pt-[26%] pb-[12%] px-[17px] text-sm text-[#382e26]" style="${memoStyleAttr(initCard)}"><p class="whitespace-pre-wrap leading-relaxed select-text text-justify [text-align-last:left]">${escapeHtml(e.content)}</p></div>
           ${!showPrivateLock ? `<div class="flex items-center justify-between text-xs text-[#5c5046] pt-1"><span class="select-none">給予心情反應（長按可選更多）</span>${modalReactBtnHtml}</div>` : ''}
         `)}
       </div>`;
