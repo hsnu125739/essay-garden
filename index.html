@@ -207,6 +207,11 @@
     .essay-scroll-row.is-dragging, .essay-scroll-row.is-dragging .essay-card {
       cursor: grabbing;
     }
+    #essay-carousel {
+      padding-top: 8px;
+      padding-bottom: 24px;
+      margin-bottom: -16px;
+    }
     #full-garden-viewport svg { touch-action: none; }
   </style>
 </head>
@@ -254,7 +259,7 @@
         <button type="button" id="btn-write-composer" class="w-full sky-card rounded-2xl px-2.5 py-2 flex items-center gap-2 text-left hover:border-[#2b5e4e]/45 active:scale-[0.99] transition"></button>
 
         <!-- 橫向滑動輪播：由新到舊排列浮動隨筆便條（最多 10 則） -->
-        <div id="essay-carousel" class="essay-scroll-row relative z-30 flex items-stretch gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 py-2 cursor-grab"></div>
+        <div id="essay-carousel" class="essay-scroll-row relative z-30 flex items-stretch gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pt-2 pb-6 -mb-4 cursor-grab"></div>
       </section>
 
       <!-- 下半部：延伸至底部的無邊框 3D 懸浮花園島 + 懸浮於底部的月份與佈置資訊膠囊 -->
@@ -361,6 +366,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261122l"></script>
+  <script type="module" src="./app.js?v=20261122m"></script>
 </body>
 </html>
