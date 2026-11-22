@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122g';
+} from './engine.js?v=20261122h';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122g';
-import { CloudGardenStore } from './cloud-store.js?v=20261122g';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122g';
-import { bgManager } from './bg-manager.js?v=20261122g';
+} from './store.js?v=20261122h';
+import { CloudGardenStore } from './cloud-store.js?v=20261122h';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122h';
+import { bgManager } from './bg-manager.js?v=20261122h';
 
-const ASSET_VER = '20261122g';
+const ASSET_VER = '20261122h';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
