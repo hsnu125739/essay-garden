@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122u';
+} from './engine.js?v=20261122v';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122u';
-import { CloudGardenStore } from './cloud-store.js?v=20261122u';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122u';
-import { bgManager } from './bg-manager.js?v=20261122u';
+} from './store.js?v=20261122v';
+import { CloudGardenStore } from './cloud-store.js?v=20261122v';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122v';
+import { bgManager } from './bg-manager.js?v=20261122v';
 
-const ASSET_VER = '20261122u';
+const ASSET_VER = '20261122v';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -843,10 +843,10 @@ function alignFullIslandViewBox(regionSize) {
   const islBottomY = -175 * islandScale + 410 * islandScale;
   const svgBaseCenterY = sr.top + sr.height / 2;
 
-  // 原則：調低島嶼位置消除偏高感；保護底線：泥土尖端絕不插入最下方選單（距選單頂部至少保留 20px 淨空）
-  const targetScreenY = winH / 2 + 105;
+  // 原則：調低島嶼位置消除偏高感；保護底線：泥土尖端絕不插入最下方選單（距選單頂部至少保留 8px）
+  const targetScreenY = winH / 2 + 130;
   const vbCyTarget = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
-  const vbCyMin = islBottomY - ((navTop - 32) - svgBaseCenterY) / scale;
+  const vbCyMin = islBottomY - ((navTop - 8) - svgBaseCenterY) / scale;
   const vbCy = Math.max(vbCyTarget, vbCyMin);
   const vbY = vbCy - FULL_VB_H / 2;
   fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
