@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122j';
+} from './engine.js?v=20261122k';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122j';
-import { CloudGardenStore } from './cloud-store.js?v=20261122j';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122j';
-import { bgManager } from './bg-manager.js?v=20261122j';
+} from './store.js?v=20261122k';
+import { CloudGardenStore } from './cloud-store.js?v=20261122k';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122k';
+import { bgManager } from './bg-manager.js?v=20261122k';
 
-const ASSET_VER = '20261122j';
+const ASSET_VER = '20261122k';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -982,7 +982,46 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
     </div>`;
 }
 
+function updateEssayCardLineClamps(containerEl = document) {
+  const cards = containerEl?.querySelectorAll ? containerEl.querySelectorAll('.essay-card') : [];
+  if (!cards || !cards.length) return;
+
+  cards.forEach(cardEl => {
+    const wrapEl = cardEl.querySelector('.essay-text-wrap');
+    const textEl = cardEl.querySelector('.memo-text, .memo-text-compact');
+    if (!wrapEl || !textEl) return;
+
+    const textArea_h = wrapEl.clientHeight || wrapEl.getBoundingClientRect().height;
+    if (textArea_h <= 0) return;
+
+    const computedStyle = window.getComputedStyle(textEl);
+    let line_h = parseFloat(computedStyle.lineHeight);
+    if (!line_h || isNaN(line_h)) {
+      const fontSize = parseFloat(computedStyle.fontSize) || 13;
+      line_h = fontSize * 1.48;
+    }
+
+    // 隨筆卡文字區域高度 (textArea_h) 與行高 (line_h) 相除取高斯 (Math.floor)
+    const lines = Math.floor(textArea_h / line_h);
+    const maxLines = Math.max(1, lines);
+
+    textEl.style.webkitLineClamp = String(maxLines);
+    textEl.style.setProperty('-webkit-line-clamp', String(maxLines));
+  });
+}
+
 function bindEssayCards(containerEl, essayById) {
+  updateEssayCardLineClamps(containerEl);
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => updateEssayCardLineClamps(containerEl));
+  }
+  if (typeof ResizeObserver !== 'undefined' && containerEl && !containerEl.__clampObserver) {
+    containerEl.__clampObserver = new ResizeObserver(() => {
+      updateEssayCardLineClamps(containerEl);
+    });
+    containerEl.__clampObserver.observe(containerEl);
+  }
+
   containerEl.querySelectorAll('.essay-card').forEach(cardEl => {
     const target = essayById.get(cardEl.dataset.essayId);
     const reactBtn = cardEl.querySelector('[data-react-btn]');
@@ -2868,6 +2907,7 @@ async function boot() {
     if (ui.screen === 'home' && lastIslandContext) {
       alignHomeIslandViewBox(lastIslandContext.evalData.region.size);
     }
+    updateEssayCardLineClamps();
   });
 
   const updateTailPullFeedback = (rowEl, pullPx) => {
