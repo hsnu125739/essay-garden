@@ -247,13 +247,13 @@ const CSS_RULES = `
     animation: rainLocalGlide 2.2s linear infinite 0s both;
   }
 
-  /* 肥皂泡漂浮外層容器：專責 Y 軸緩緩升騰（升到標題區塊下方 -760px~-800px 才破裂淡出） */
+  /* 肥皂泡漂浮外層容器：專責 Y 軸緩緩升騰（在隨機高度：島中心點高度 -460px ~ 標題區塊下緣 -760px 自然破裂淡出） */
   @keyframes soapBubbleRiseUp {
     0% { transform: translateY(0); opacity: 0; }
     8% { opacity: 0.95; }
-    84% { opacity: 0.95; }
-    94% { opacity: 0; transform: translateY(-760px); }
-    100% { opacity: 0; transform: translateY(-800px); }
+    82% { opacity: 0.95; }
+    94% { opacity: 0; transform: translateY(calc(var(--rise-h, -620px) * 0.95)); }
+    100% { opacity: 0; transform: translateY(var(--rise-h, -620px)); }
   }
   .bubble-riser {
     position: absolute;
@@ -360,7 +360,7 @@ export function makeSunsetCloudSvg(scale, opacity, id) {
               fill="none" stroke="#fef08a" stroke-width="3" opacity="0.85"/>
         <circle cx="155" cy="46" r="28" fill="#fed7aa" opacity="0.45"/>
         <circle cx="218" cy="50" r="32" fill="#fb923c" opacity="0.4"/>
-        <ellipse cx="175" cy="118" rx="95" ry="16" fill="#2d1245" opacity="0.7"/>
+        <ellipse cx="175" cy="118" rx="95" ry="16" fill="#6d3d7d" opacity="0.4"/>
       </g>
     </svg>`;
 }
@@ -1289,26 +1289,26 @@ export class BgManager {
 
   _renderBubbles() {
     // 總共 9 顆泡泡，嚴格 1:2 分層，且所有尺寸等比縮小 50%：
-    // 1/3（3 顆）在前景層（#dynamic-fg-layer），尺寸縮小 50% 為 39~46px（原 78~92px）
-    // 上升至頂部標題區塊下方才自然破裂淡出（-760px~-800px），絕不遮擋頂部標題區塊與底部的文字框及選單
+    // 1/3（3 顆）在前景層（#dynamic-fg-layer），尺寸 39~46px
+    // 破裂高度隨機分佈在限制範圍：島中心點高度（約 -460px）~ 標題區塊下緣（約 -760px）
     const foreBubbles = [
-      { left: '36%', dur: '11.0s', del: '-1.5s', size: 41 },
-      { left: '48%', dur: '12.5s', del: '-5.2s', size: 46 },
-      { left: '60%', dur: '11.5s', del: '-8.8s', size: 39 }
+      { left: '36%', dur: '10.5s', del: '-1.5s', size: 41, riseH: '-540px' },
+      { left: '48%', dur: '12.5s', del: '-5.2s', size: 46, riseH: '-740px' },
+      { left: '60%', dur: '11.0s', del: '-8.8s', size: 39, riseH: '-620px' }
     ];
 
-    // 2/3（6 顆）在後景層（#dynamic-bg-layer），尺寸縮小 50% 為 22~33px（原 44~66px）
+    // 2/3（6 顆）在後景層（#dynamic-bg-layer），尺寸 22~33px
     const backBubbles = [
-      { left: '8%',  dur: '14.0s', del: '-2.0s', size: 23 },
-      { left: '18%', dur: '10.0s', del: '-6.5s', size: 31 },
-      { left: '26%', dur: '13.5s', del: '-10.0s', size: 25 },
-      { left: '74%', dur: '12.0s', del: '-3.5s', size: 22 },
-      { left: '82%', dur: '15.5s', del: '-7.5s', size: 33 },
-      { left: '92%', dur: '10.5s', del: '-1.0s', size: 24 }
+      { left: '8%',  dur: '13.5s', del: '-2.0s', size: 23, riseH: '-470px' },
+      { left: '18%', dur: '10.0s', del: '-6.5s', size: 31, riseH: '-670px' },
+      { left: '26%', dur: '12.5s', del: '-10.0s', size: 25, riseH: '-570px' },
+      { left: '74%', dur: '11.5s', del: '-3.5s', size: 22, riseH: '-750px' },
+      { left: '82%', dur: '14.0s', del: '-7.5s', size: 33, riseH: '-500px' },
+      { left: '92%', dur: '10.5s', del: '-1.0s', size: 24, riseH: '-690px' }
     ];
 
     const renderBubbleHtml = (bubbles) => bubbles.map(b => `
-      <div class="bubble-riser anim-soap-bubble" style="left: ${b.left}; bottom: -60px; --dur: ${b.dur}; --del: ${b.del};">
+      <div class="bubble-riser anim-soap-bubble" style="left: ${b.left}; bottom: -60px; --dur: ${b.dur}; --del: ${b.del}; --rise-h: ${b.riseH};">
         <div class="bubble-wobbler">
           ${makeRealSoapBubbleSvg(b.size)}
         </div>

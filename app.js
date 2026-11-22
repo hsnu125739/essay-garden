@@ -6,7 +6,7 @@ import {
   isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261122d';
+} from './engine.js?v=20261122e';
 import {
   GardenStore,
   DEMO_ESSAY_ID,
@@ -16,12 +16,12 @@ import {
   saveDemoEssayCardStyle,
   getDemoEssayReactions,
   saveDemoEssayReactions
-} from './store.js?v=20261122d';
-import { CloudGardenStore } from './cloud-store.js?v=20261122d';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122d';
-import { bgManager } from './bg-manager.js?v=20261122d';
+} from './store.js?v=20261122e';
+import { CloudGardenStore } from './cloud-store.js?v=20261122e';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261122e';
+import { bgManager } from './bg-manager.js?v=20261122e';
 
-const ASSET_VER = '20261122d';
+const ASSET_VER = '20261122e';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -965,8 +965,8 @@ function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = f
     ? 'w-[42%] min-w-[150px] h-[clamp(152px,23vh,198px)] pt-11 pb-2.5 px-3'
     : 'w-[45%] h-[clamp(196px,31vh,264px)] card-float pt-12 pb-3.5 px-4';
   const textCls = compact
-    ? 'memo-text-compact text-xs text-[#382e26] leading-relaxed'
-    : 'memo-text text-[13px] text-[#382e26] leading-relaxed';
+    ? 'memo-text-compact text-xs text-[#382e26] leading-snug whitespace-pre-wrap break-words'
+    : 'memo-text text-[13px] text-[#382e26] leading-[1.48] whitespace-pre-wrap break-words';
   const floatStyle = compact ? '' : `animation-delay:${(idx % 3) * 1.1}s`;
 
   return `
