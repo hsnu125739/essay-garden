@@ -13,7 +13,7 @@
 | **Spreadsheet ID** | `1UBt7fuHru0fJv1QLStpvaIr2YxIg2vO9sM8yrd-cTAE` | 已共用給 Service Account (`service-account@antigravity-ai-tool.iam.gserviceaccount.com`) |
 | **網址** | `https://docs.google.com/spreadsheets/d/1UBt7fuHru0fJv1QLStpvaIr2YxIg2vO9sM8yrd-cTAE` | 開發前初始狀態僅含空白 `工作表1`（1000×26） |
 | **白箱檢驗通道** | `C:\Users\wl020\.gemini\config\mcp_servers\gsheet_io.py` + Google Sheets API v4 | 不經 GAS 直接核對試算表工作表、表頭、儲存格格式與實際寫入內容 |
-| **GAS 端點** | `GAS_WEBAPP_URL`（於 M2 部署後填入環境設定） | 一律採 `POST` + `Content-Type: text/plain;charset=utf-8` 呼叫，覆蓋 `ping`、`auth`、`logout` 與其餘 19 個業務 Action（共 22 個 Action） |
+| **GAS 端點** | `GAS_WEBAPP_URL`（於 M2 部署後填入環境設定） | 一律採 `POST` + `Content-Type: text/plain;charset=utf-8` 呼叫，覆蓋 `ping`、`auth`、`logout` 與其餘 21 個業務 Action（共 24 個 Action） |
 
 ### 1.2 七層驗證金字塔（L0～L6）
 
@@ -21,7 +21,7 @@
 flowchart TD
     L0["L0 既有本機回歸 (test_verification.py / createMemoryStorage)"] --> L1["L1 Google Sheets 結構、表頭與純文字格式白箱檢驗"]
     L1 --> L2["L2 GAS 核心規則與 engine.js 一致性本地單元測試"]
-    L2 --> L3["L3 GAS Web App 實彈 HTTP POST (22 Actions / 13 Errors) + 白箱入庫核對"]
+    L2 --> L3["L3 GAS Web App 實彈 HTTP POST (24 Actions / 14 Errors) + 白箱入庫核對"]
     L3 --> L4["L4 多執行緒併發壓測、Sheets 防呆與隱私安全滲透測試"]
     L4 --> L5["L5 Playwright 行動端 / 雙裝置 E2E 與斷網韌性測試"]
     L5 --> L6["L6 純使用者探索式驗收 (browser Subagent 自由操作與 UX 反饋)"]
@@ -81,15 +81,15 @@ flowchart TD
 | 編號 | 優先級 | 層級 | 檢驗項目 | 檢驗方式與具體通過標準 |
 | :--- | :---: | :---: | :--- | :--- |
 | `TC-S01` | P0 | L1 | 工作表清單完整性 | 透過 `get_sheet_info` 確認試算表僅存在且精確命名為 `users`、`groups`、`gardens`、`essays` 4 張工作表；預設空白的 `工作表1` 必須已移除或更名。 |
-| `TC-S02` | P0 | L1 | 4 表欄位名稱與順序 | 讀取每張表第 1 列（1-indexed）並比對完全相等：<br>1. `users`（21 欄）：`uid, username, password_hash, session_hashes_json, display_name, timezone, active_group_id, energy, pity, streak_count, streak_last_day, streak_prev_count, streak_prev_last_day, seeds_json, limited_seeds_json, milestones_json, dex_json, last_card_style, makeup_days_json, created_at, updated_at`<br>2. `groups`（13 欄）：`group_id, name, owner_uid, status, invite_code, member_uids_json, former_member_uids_json, timezone, theme_vote_month, theme_votes_json, makeup_days_json, created_at, updated_at`<br>3. `gardens`（12 欄）：`garden_id, owner_type, owner_id, month, theme, status, snapshot_name, size, expansions, items_json, created_at, updated_at`<br>4. `essays`：第 1 列 `A1 === "day_key"`，其右側欄位依序為各使用者 `uid`。 |
-| `TC-S03` | P0 | L1 | 純文字 (`@`) 與數值格式預配置 | 以 Sheets API `spreadsheets.get(includeGridData=true)` 檢查關鍵欄預設儲存格格式為 `numberFormat.type === "TEXT"`（`pattern === "@"`）：<br>- `users`：`uid`, `username`, `password_hash`, `session_hashes_json`, `display_name`, `timezone`, `active_group_id`, `streak_last_day`, `streak_prev_last_day`, `seeds_json`, `limited_seeds_json`, `milestones_json`, `dex_json`, `last_card_style`, `makeup_days_json`<br>- `groups`：`group_id`, `name`, `owner_uid`, `status`, `invite_code`, `member_uids_json`, `former_member_uids_json`, `timezone`, `theme_vote_month`, `theme_votes_json`, `makeup_days_json`<br>- `gardens`：`garden_id`, `owner_type`, `owner_id`, `month`, `theme`, `status`, `snapshot_name`, `items_json`<br>- `essays`：整張表（包含 A 欄 `day_key` 與所有 `uid` 直欄）。 |
+| `TC-S02` | P0 | L1 | 4 表欄位名稱與順序 | 讀取每張表第 1 列（1-indexed）並比對完全相等：<br>1. `users`（22 欄）：`uid, username, password_hash, session_hashes_json, display_name, timezone, active_group_id, energy, pity, streak_count, streak_last_day, streak_prev_count, streak_prev_last_day, seeds_json, limited_seeds_json, milestones_json, dex_json, last_card_style, makeup_days_json, created_at, updated_at, bg_themes_json`<br>2. `groups`（13 欄）：`group_id, name, owner_uid, status, invite_code, member_uids_json, former_member_uids_json, timezone, theme_vote_month, theme_votes_json, makeup_days_json, created_at, updated_at`<br>3. `gardens`（12 欄）：`garden_id, owner_type, owner_id, month, theme, status, snapshot_name, size, expansions, items_json, created_at, updated_at`<br>4. `essays`：第 1 列 `A1 === "day_key"`，其右側欄位依序為各使用者 `uid`。 |
+| `TC-S03` | P0 | L1 | 純文字 (`@`) 與數值格式預配置 | 以 Sheets API `spreadsheets.get(includeGridData=true)` 檢查關鍵欄預設儲存格格式為 `numberFormat.type === "TEXT"`（`pattern === "@"`）：<br>- `users`：`uid`, `username`, `password_hash`, `session_hashes_json`, `display_name`, `timezone`, `active_group_id`, `streak_last_day`, `streak_prev_last_day`, `seeds_json`, `limited_seeds_json`, `milestones_json`, `dex_json`, `last_card_style`, `makeup_days_json`, `bg_themes_json`<br>- `groups`：`group_id`, `name`, `owner_uid`, `status`, `invite_code`, `member_uids_json`, `former_member_uids_json`, `timezone`, `theme_vote_month`, `theme_votes_json`, `makeup_days_json`<br>- `gardens`：`garden_id`, `owner_type`, `owner_id`, `month`, `theme`, `status`, `snapshot_name`, `items_json`<br>- `essays`：整張表（包含 A 欄 `day_key` 與所有 `uid` 直欄）。 |
 | `TC-S04` | P0 | L0 | 既有本機回歸契約 | 執行 [test_verification.py](file:///d:/Antigravity%20workspaces/交通美地/test_verification.py) 必須輸出 `ALL_ENGINE_AND_ARCHITECTURE_CONTRACTS_PASSED` 且 exit code = 0，確認 46 種植物／6 種裝飾／15 張島嶼圖、`createMemoryStorage` 與 `ASSET_VER` 一致性未遭破壞。 |
 | `TC-S05` | P0 | L2 | GAS 共用規則與 [engine.js](file:///d:/Antigravity%20workspaces/交通美地/engine.js) 一致性 | 於 Node 同時載入 GAS 共用核心與前端 `engine.js`，針對相同測資（中英混排字數、10～150 字稀有度機率、多人天數進位、Lv1～Lv5 與枯萎復活／死亡邊界、`resolveGroupThemeVote` 含平票與無人投票雜湊）比對輸出 100% 相等；包含 `finalStage: 'dead'` + `finalLevel` 測試。 |
 | `TC-S06` | P0 | L3 | HTTP POST / `text/plain` 連通性與時間校準 | 以 `POST` + `Content-Type: text/plain;charset=utf-8` 呼叫 `action: "ping"`（追蹤 GAS 302 重導向）：確認不發送 `OPTIONS` 即可取得 HTTP 200 JSON `{ ok: true, serverTimeMs }`，且 `|serverTimeMs - utcNowMs| < 10_000`。 |
 
 ---
 
-## §4 L2 & L3：全部 22 個 Action 功能與白箱入庫測試矩陣（`TC-A01`～`TC-A26`）
+## §4 L2 & L3：全部 24 個 Action 功能與白箱入庫測試矩陣（`TC-A01`～`TC-A26`）
 
 > 除明確標註失敗案例外，每筆成功案例均須執行 **雙重驗證**：① API 回傳 `{ ok: true, serverTimeMs, data }` 結構與數值正確；② 直接透過 `gsheet_io` 讀取試算表底層儲存格確認真實落盤結果正確。
 

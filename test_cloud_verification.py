@@ -46,6 +46,7 @@ HEADERS = {
         "makeup_days_json",
         "created_at",
         "updated_at",
+        "bg_themes_json",
     ],
     "groups": [
         "group_id",
@@ -287,6 +288,7 @@ function makeMockGasEnv({ withContentService = false } = {}) {
   let uuidTick = 0;
   let lockShouldFail = false;
   let locked = false;
+  let batchUpdateCalls = 0;
   const backups = [];
 
   const makeTabState = (initRows, maxRows, maxCols) => ({
@@ -300,7 +302,7 @@ function makeMockGasEnv({ withContentService = false } = {}) {
   });
 
   const sheets = {
-    users: makeTabState([gas.HEADERS.users.slice()], 100, 21),
+    users: makeTabState([gas.HEADERS.users.slice()], 100, gas.HEADERS.users.length),
     groups: makeTabState([gas.HEADERS.groups.slice()], 100, 20),
     gardens: makeTabState([gas.HEADERS.gardens.slice()], 100, 20),
     essays: makeTabState([['day_key']], 100, 20)
@@ -407,6 +409,7 @@ function makeMockGasEnv({ withContentService = false } = {}) {
             };
           },
           batchUpdate: (body, id) => {
+            batchUpdateCalls += 1;
             assert.equal(id, gas.SPREADSHEET_ID);
             assert.equal(body.valueInputOption, 'RAW');
             for (const item of body.data) {
@@ -458,7 +461,9 @@ function makeMockGasEnv({ withContentService = false } = {}) {
     sheets,
     backups,
     setLockFail: (v) => { lockShouldFail = v; },
-    isLocked: () => locked
+    isLocked: () => locked,
+    getBatchUpdateCount: () => batchUpdateCalls,
+    resetBatchUpdateCount: () => { batchUpdateCalls = 0; }
   };
   gas.__setGasEnv(env);
   return env;
@@ -491,7 +496,12 @@ for (const k of Object.keys(gas.GAME_CONFIG)) {
 eq(Object.keys(gas.CATALOG.themes), Object.keys(fileCat.themes), 'themes keys mismatch');
 eq(gas.CATALOG.species, fileCat.species, 'species mismatch');
 eq(gas.CATALOG.decor, fileCat.decor, 'decor mismatch');
-eq(gas.HEADERS.users.length, 21, 'users must have 21 cols');
+eq(
+  gas.CATALOG.bgThemes,
+  fileCat.bgThemes.map(({ id, name, cost }) => ({ id, name, cost })),
+  'bgThemes mismatch'
+);
+eq(gas.HEADERS.users.length, 22, 'users must have 22 cols');
 eq(gas.HEADERS.groups.length, 13, 'groups must have 13 cols');
 eq(gas.HEADERS.gardens.length, 12, 'gardens must have 12 cols');
 
@@ -567,6 +577,29 @@ const bDecor = [{ itemId: 'dec_lantern' }, { itemId: 'dec_arch' }];
 eq(gas.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), eng.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), 'beauty');
 for (const vm of [{ u1: 'forest', u2: 'oasis' }, { u1: 'oasis', u2: 'oasis', u3: 'flowerbed' }, {}]) {
   eq(gas.resolveGroupThemeVote('grp_1', '2026-12', vm), eng.resolveGroupThemeVote('grp_1', '2026-12', vm), 'vote');
+}
+for (const [pl, dMap, tk, gt] of [
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-05', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-06', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { writers: { u1: 1 } } }, '2026-11-05', 'group'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { writers: { u1: 1 } } }, '2026-11-06', 'group']
+]) {
+  eq(gas.canRescuePlantByMakeUp(pl, dMap, tk, gt), eng.canRescuePlantByMakeUp(pl, dMap, tk, gt), `canRescue(${tk},${gt})`);
+}
+const occSampleGarden = {
+  items: {
+    plants: { p1: { id: 'p1', x: 1, y: 2 } },
+    decor: { d1: { id: 'd1', x: 3, y: 0 } }
+  }
+};
+for (const [target, x, y, ignore] of [
+  [occSampleGarden, 1, 2, null],
+  [occSampleGarden, 3, 0, null],
+  [occSampleGarden, 3, 0, 'd1'],
+  [occSampleGarden.items, 1, 2, 'p1'],
+  [occSampleGarden.items, 4, 4, null]
+]) {
+  eq(gas.isCellOccupied(target, x, y, ignore), eng.isCellOccupied(target, x, y, ignore), `isCellOccupied(${x},${y},${ignore})`);
 }
 console.log('[TC-S05] PASSED');
 
@@ -900,7 +933,101 @@ eq(mock.backups[1].trashed, true, 'old >14d non-1st backup trashed');
 eq(mock.backups[2].name, 'backup_2027-01-03', 'today backup created');
 assert.equal(mock.isLocked(), false, 'script lock released');
 
-console.log('M2_L2_ENGINE_PARITY_AND_22_ACTIONS_SIMULATION_PASSED');
+// (13) commitMutations 單次 batchUpdate 驗證
+mock.resetBatchUpdateCount();
+ok('plantSeed', uCap.sessionToken, {
+  gardenId: ok('bootstrap', uCap.sessionToken, {}).gardens.find((g) => g.status === 'active').gardenId,
+  speciesId: 'fb_c1',
+  x: 0,
+  y: 0,
+  isLimited: false
+});
+eq(mock.getBatchUpdateCount(), 1, 'plantSeed uses single batchUpdate');
+
+const uCm = ok('auth', '', { username: 'u_test_cm', password: 'pw12', timezone: 'Asia/Taipei' });
+mock.resetBatchUpdateCount();
+ok('createGroup', uCm.sessionToken, { name: '單次寫入團', theme: 'forest' });
+eq(mock.getBatchUpdateCount(), 1, 'createGroup uses single batchUpdate');
+mock.resetBatchUpdateCount();
+ok('leaveGroup', uCm.sessionToken, { newPersonalTheme: 'flowerbed' });
+eq(mock.getBatchUpdateCount(), 1, 'leaveGroup uses single batchUpdate');
+
+// (14) INTERNAL_ERROR 隔離、壞 JSON 儲存格與配額錯誤
+const badJsonPost = JSON.parse(gas.doPost({ postData: { contents: '{not_json' } }));
+eq(badJsonPost.code, 'VALIDATION_ERROR', 'malformed request JSON -> VALIDATION_ERROR');
+
+const corruptRowIdx = mock.sheets.essays.rows.findIndex((r, idx) => idx >= 1 && r[1]);
+const origEssayCell = mock.sheets.essays.rows[corruptRowIdx][1];
+mock.sheets.essays.rows[corruptRowIdx][1] = '{corrupt_json';
+const corruptErr = fail('getEssaysByMonth', tokA, { month: mock.sheets.essays.rows[corruptRowIdx][0].slice(0, 7) }, 'INTERNAL_ERROR');
+assert.ok(!corruptErr.message.includes('Corrupt') && !corruptErr.message.includes('SyntaxError'), 'INTERNAL_ERROR must not leak internals');
+mock.sheets.essays.rows[corruptRowIdx][1] = origEssayCell;
+
+const origBatchUpdate = mock.Sheets.Spreadsheets.Values.batchUpdate;
+mock.Sheets.Spreadsheets.Values.batchUpdate = () => { throw new Error('Quota exceeded for quota metric'); };
+try {
+  const quotaErr = fail('updateDisplayName', tokA, { displayName: '配額測試' }, 'LOCK_TIMEOUT');
+  assert.ok(quotaErr.message.includes('配額'), 'quota error mapped cleanly');
+} finally {
+  mock.Sheets.Spreadsheets.Values.batchUpdate = origBatchUpdate;
+}
+
+// (15) hasMoreEssayHistory 跨帳號與團體私密隨筆隔離
+const uH1 = ok('auth', '', { username: 'u_test_hist1', password: 'pw12', timezone: 'Asia/Taipei' });
+const uH2 = ok('auth', '', { username: 'u_test_hist2', password: 'pw12', timezone: 'Asia/Taipei' });
+// 雖然表上已有大量他人在 2025/2026 的舊隨筆，新帳號必須為 false
+eq(ok('bootstrap', uH1.sessionToken, { essayMonthsLimit: 2 }).hasMoreEssayHistory, false, 'new account ignores other users old essays');
+
+const hGrp = ok('createGroup', uH1.sessionToken, { name: '歷史邊界團', theme: 'forest' });
+ok('joinGroup', uH2.sessionToken, { inviteCode: hGrp.group.inviteCode });
+const colH2 = mock.sheets.essays.rows[0].indexOf('u_test_hist2');
+const oldHistRow = ['2026-09-10'];
+oldHistRow[colH2] = JSON.stringify([{
+  id: 'e_h2_priv', gardenId: hGrp.garden.gardenId, groupId: hGrp.group.groupId,
+  content: '他人的舊月份私密團體隨筆不應顯示展開歷史按鈕', wordCount: 22,
+  private: true, cardStyle: 'card1', reward: null, reactions: {}, createdAt: 10, updatedAt: 10
+}]);
+mock.sheets.essays.rows.push(oldHistRow);
+eq(ok('bootstrap', uH1.sessionToken, { essayMonthsLimit: 2 }).hasMoreEssayHistory, false, 'ignores teammate old private essays');
+oldHistRow[colH2] = JSON.stringify([{
+  id: 'e_h2_pub', gardenId: hGrp.garden.gardenId, groupId: hGrp.group.groupId,
+  content: '他人的舊月份公開團體隨筆應該顯示展開歷史按鈕', wordCount: 22,
+  private: false, cardStyle: 'card1', reward: null, reactions: {}, createdAt: 11, updatedAt: 11
+}]);
+eq(ok('bootstrap', uH1.sessionToken, { essayMonthsLimit: 2 }).hasMoreEssayHistory, true, 'detects teammate old public essays');
+
+// (16) 雲端背景主題 buyBgTheme / setBgTheme 與第 22 欄白箱
+const uBg = ok('auth', '', { username: 'u_test_bg', password: 'pw12', timezone: 'Asia/Taipei' });
+const uBgRow = mock.sheets.users.rows.find((r) => r[0] === 'u_test_bg');
+uBgRow[7] = 100;
+const bootBgInit = ok('bootstrap', uBg.sessionToken, {});
+eq(bootBgInit.user.unlockedBgThemes, ['morning'], 'init unlockedBgThemes');
+eq(bootBgInit.user.activeBgTheme, 'morning', 'init activeBgTheme');
+
+fail('buyBgTheme', uBg.sessionToken, { themeId: 'no_such' }, 'NOT_FOUND');
+const buySunset = ok('buyBgTheme', uBg.sessionToken, { themeId: 'sunset' });
+eq(buySunset.alreadyOwned, false, 'first buy sunset');
+eq(buySunset.energy, 50, 'sunset costs 50');
+eq(buySunset.unlockedBgThemes, ['morning', 'sunset'], 'sunset unlocked');
+eq(buySunset.activeBgTheme, 'sunset', 'sunset activated');
+eq(JSON.parse(uBgRow[21]), { unlocked: ['morning', 'sunset'], active: 'sunset' }, 'col 22 persisted');
+
+const buyAgain = ok('buyBgTheme', uBg.sessionToken, { themeId: 'sunset' });
+eq(buyAgain.alreadyOwned, true, 'rebuy alreadyOwned=true');
+eq(buyAgain.energy, 50, 'rebuy does not charge');
+
+fail('buyBgTheme', uBg.sessionToken, { themeId: 'rain' }, 'INSUFFICIENT_ENERGY');
+fail('setBgTheme', uBg.sessionToken, { themeId: 'night' }, 'FORBIDDEN');
+fail('setBgTheme', uBg.sessionToken, { themeId: 'invalid_id' }, 'VALIDATION_ERROR');
+
+const swMorning = ok('setBgTheme', uBg.sessionToken, { themeId: 'morning' });
+eq(swMorning.activeBgTheme, 'morning', 'switched to morning');
+const bootBgAfter = ok('bootstrap', uBg.sessionToken, {});
+eq(bootBgAfter.user.unlockedBgThemes, ['morning', 'sunset'], 'bootstrap keeps unlockedBgThemes');
+eq(bootBgAfter.user.activeBgTheme, 'morning', 'bootstrap keeps activeBgTheme');
+assert.equal(mock.isLocked(), false, 'script lock released at end');
+
+console.log('M2_L2_ENGINE_PARITY_AND_24_ACTIONS_SIMULATION_PASSED');
 """.replace("__MOCK_GAS_ENV__", MOCK_GAS_ENV_JS)
 
 
@@ -1177,6 +1304,50 @@ eq(augEssays2.length, 1, 'cached 1 Aug essay');
 const callsAfterAug = backend.calls.filter((c) => c.action === 'getEssaysByMonth').length;
 eq(callsAfterAug - callsBeforeAug, 1, 'getEssaysByMonth called only once for 2026-08');
 
+// 雲端背景主題購買、跨裝置同步與樂觀切換回滾
+eq(storeA.getUnlockedBgThemes(), ['morning'], 'init cloud unlockedBgThemes');
+eq(storeA.getActiveBgTheme(), 'morning', 'init cloud activeBgTheme');
+uRowA[7] = 200;
+await storeA.syncBootstrap();
+
+const bgBuyRes = await storeA.buyBgTheme('sunset');
+eq(bgBuyRes, { success: true, alreadyOwned: false }, 'buyBgTheme sunset persisted');
+eq(storeA.currentUser().energy, 150, 'sunset deducted 50 energy on server');
+eq(storeA.getUnlockedBgThemes(), ['morning', 'sunset'], 'sunset unlocked in storeA');
+eq(storeA.getActiveBgTheme(), 'sunset', 'sunset activated in storeA');
+
+const storeADev2 = new CloudGardenStore(fileCfg, fileCat, {
+  gasWebAppUrl: 'https://script.google.com/macros/s/MOCK_EXEC/exec',
+  storage: createMemoryStorage(),
+  fetchImpl: backend.fetchImpl
+});
+await storeADev2.authenticate('u_test_p3b_a', 'pw1234', 'Asia/Taipei');
+eq(storeADev2.getUnlockedBgThemes(), ['morning', 'sunset'], 'dev2 synced unlockedBgThemes');
+eq(storeADev2.getActiveBgTheme(), 'sunset', 'dev2 synced activeBgTheme');
+
+let resolveDelayedBg;
+backend.setInterceptNext((reqBody) => new Promise((resolve) => {
+  resolveDelayedBg = () => {
+    const out = gas.doPost({ postData: { contents: JSON.stringify(reqBody) } });
+    resolve({ ok: true, status: 200, text: async () => out.getContent() });
+  };
+}));
+const swPromise = storeA.setBgTheme('morning');
+eq(storeA.getActiveBgTheme(), 'morning', 'optimistic setBgTheme applied synchronously');
+resolveDelayedBg();
+eq(await swPromise, true, 'server confirmed setBgTheme');
+
+backend.setInterceptNext(async () => ({
+  ok: true,
+  status: 200,
+  text: async () => JSON.stringify({ ok: false, serverTimeMs: Date.now(), code: 'FORBIDDEN', message: '模擬拒絕切換' })
+}));
+await assert.rejects(
+  () => storeA.setBgTheme('sunset'),
+  (err) => err.code === 'FORBIDDEN'
+);
+eq(storeA.getActiveBgTheme(), 'morning', 'optimistic setBgTheme rolled back on failure');
+
 // 登出清除本機 Session 與快取
 await storeA.logout();
 eq(storeA.isAuthenticated(), false, 'logged out');
@@ -1251,7 +1422,8 @@ class LiveM2Helper:
                 assert resp.status == 200, f"Expected HTTP 200 for {action}, got {resp.status}"
                 raw = resp.read().decode("utf-8")
             parsed = json.loads(raw)
-            if not parsed.get("ok") and "Quota exceeded" in parsed.get("message", ""):
+            err_msg = parsed.get("message", "")
+            if not parsed.get("ok") and ("Quota exceeded" in err_msg or "配額" in err_msg):
                 time.sleep(3.5 * (attempt + 1))
                 continue
             break
@@ -1272,8 +1444,12 @@ class LiveM2Helper:
         return res
 
     def snapshot_db(self, render_option: str = "UNFORMATTED_VALUE") -> dict:
+        batch_ranges = [
+            f"{tab}!A1:{rowcol_to_a1(1, len(HEADERS[tab]))[:-1]}"
+            for tab in ("users", "groups", "gardens")
+        ] + ["essays!A1:ZZ"]
         res = self.sh.values_batch_get(
-            ["users!A1:U", "groups!A1:M", "gardens!A1:L", "essays!A1:ZZ"],
+            batch_ranges,
             params={"valueRenderOption": render_option},
         )
         v_ranges = res.get("valueRanges", [])
@@ -1342,7 +1518,10 @@ class LiveM2Helper:
         """移除所有 u_test_* / grp_test_* / g_test_* / snap_test_* 測試資料並還原擴欄與格式，驗證零殘留。"""
         assert_no_prod_data(self.sheet_id)
         worksheets = {w.title: w for w in self.sh.worksheets()}
-        clear_ranges = ["users!A2:U", "groups!A2:M", "gardens!A2:L", "essays!A2:A"]
+        clear_ranges = [
+            f"{tab}!A2:{rowcol_to_a1(1, len(HEADERS[tab]))[:-1]}"
+            for tab in ("users", "groups", "gardens")
+        ] + ["essays!A2:A"]
         if worksheets["essays"].col_count > 1:
             clear_ranges.extend(["essays!A2:ZZ", "essays!B1:ZZ1"])
         self.sh.values_batch_clear({
@@ -1351,7 +1530,7 @@ class LiveM2Helper:
         reqs = []
         for tab in TAB_ORDER:
             ws = worksheets[tab]
-            target_cols = 20 if tab != "users" else 21
+            target_cols = 20 if tab == "essays" else len(HEADERS[tab])
             if ws.col_count > target_cols:
                 reqs.append({
                     "deleteDimension": {

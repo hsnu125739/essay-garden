@@ -1,5 +1,5 @@
 // 隨筆花園（Essay Garden）：Google Apps Script 權威後端（V8 + Sheets API v4）
-// 對齊 database-spec.md & verification-spec.md（22 個 Action、13 個標準錯誤碼）
+// 對齊 database-spec.md & verification-spec.md（24 個 Action、14 個標準錯誤碼）
 
 const SPREADSHEET_ID = '1UBt7fuHru0fJv1QLStpvaIr2YxIg2vO9sM8yrd-cTAE';
 const BACKUP_FOLDER_NAME = '隨筆花園-自動備份';
@@ -97,11 +97,19 @@ const CATALOG = {
     { id: 'dec_rock', name: '山水景觀石', cost: 40 },
     { id: 'dec_torii', name: '朱紅小鳥居', cost: 120 },
     { id: 'dec_arch', name: '繁花拱門架', cost: 200 }
+  ],
+  bgThemes: [
+    { id: 'morning', name: '晴空白雲', cost: 0 },
+    { id: 'sunset', name: '黃昏暮霞', cost: 50 },
+    { id: 'night', name: '靜謐星河', cost: 60 },
+    { id: 'rain', name: '雨後彩虹', cost: 80 },
+    { id: 'bubbles', name: '夢幻泡泡', cost: 80 }
   ]
 };
 
 const SPECIES_MAP = Object.fromEntries(CATALOG.species.map(function (s) { return [s.id, s]; }));
 const DECOR_MAP = Object.fromEntries(CATALOG.decor.map(function (d) { return [d.id, d]; }));
+const BG_THEME_MAP = Object.fromEntries(CATALOG.bgThemes.map(function (b) { return [b.id, b]; }));
 
 const VALID_THEMES = { flowerbed: true, forest: true, oasis: true };
 const VALID_CARD_STYLES = {
@@ -115,7 +123,8 @@ const HEADERS = {
     'timezone', 'active_group_id', 'energy', 'pity', 'streak_count',
     'streak_last_day', 'streak_prev_count', 'streak_prev_last_day',
     'seeds_json', 'limited_seeds_json', 'milestones_json', 'dex_json',
-    'last_card_style', 'makeup_days_json', 'created_at', 'updated_at'
+    'last_card_style', 'makeup_days_json', 'created_at', 'updated_at',
+    'bg_themes_json'
   ],
   groups: [
     'group_id', 'name', 'owner_uid', 'status', 'invite_code',
@@ -162,6 +171,7 @@ function __setGasEnv(overrides) {
 function appError(code, message) {
   var err = new Error(message);
   err.code = code;
+  err.isAppError = true;
   return err;
 }
 
@@ -449,6 +459,28 @@ function resolveGroupThemeVote(gardenId, monthKey, votesMap, allThemes) {
   return candidates[(h >>> 0) % candidates.length];
 }
 
+function canRescuePlantByMakeUp(plant, baseDays, todayKey, gardenType) {
+  if (!plant) return false;
+  var safeDays = baseDays || {};
+  var gType = gardenType || 'personal';
+  var yesterdayKey = addDays(todayKey, -1);
+  var simulatedDays = Object.assign({}, safeDays);
+  simulatedDays[yesterdayKey] = Object.assign({}, safeDays[yesterdayKey] || {}, { madeUp: true });
+  return evaluatePlantState(plant, simulatedDays, todayKey, gType).stage !== 'dead';
+}
+
+function isCellOccupied(itemsOrRegion, x, y, ignoreItemId) {
+  if (!itemsOrRegion) return false;
+  var ignoreId = ignoreItemId === undefined ? null : ignoreItemId;
+  var src = itemsOrRegion.items || itemsOrRegion;
+  var nx = Number(x);
+  var ny = Number(y);
+  var matches = function (item) {
+    return item && item.id !== ignoreId && Number(item.x) === nx && Number(item.y) === ny;
+  };
+  return Object.values(src.plants || {}).some(matches) || Object.values(src.decor || {}).some(matches);
+}
+
 // ----------------------------------------------------------------------------
 // 3. 密碼與 Session 雜湊（單向加鹽 SHA-256 + 常數時間比對）
 // ----------------------------------------------------------------------------
@@ -512,10 +544,32 @@ function colToLetter(col1) {
   return s;
 }
 
-function parseJsonSafe(raw, fallback) {
+function parseJsonCell(raw, fallback) {
   if (raw === undefined || raw === null || raw === '') return fallback;
   if (typeof raw === 'object') return raw;
-  return JSON.parse(String(raw));
+  try {
+    return JSON.parse(String(raw));
+  } catch (err) {
+    throw new Error('Corrupt JSON cell: ' + err.message);
+  }
+}
+
+function normalizeBgThemesState(raw) {
+  var parsed = parseJsonCell(raw, null);
+  var unlocked = ['morning'];
+  var seen = { morning: true };
+  if (parsed && Array.isArray(parsed.unlocked)) {
+    for (var i = 0; i < parsed.unlocked.length; i++) {
+      var tid = String(parsed.unlocked[i] || '').trim();
+      if (tid && BG_THEME_MAP[tid] && !seen[tid]) {
+        seen[tid] = true;
+        unlocked.push(tid);
+      }
+    }
+  }
+  var candidateActive = parsed && typeof parsed.active === 'string' ? parsed.active.trim() : 'morning';
+  var active = seen[candidateActive] ? candidateActive : 'morning';
+  return { unlocked: unlocked, active: active };
 }
 
 function randId4() {
@@ -561,8 +615,8 @@ function valuesBatchWrite(dataItems) {
   );
 }
 
-function ensureSheetCapacity(sheetName, neededRow, neededCol) {
-  var ss = ENV.SpreadsheetApp.openById(ENV.spreadsheetId);
+function ensureSheetCapacity(sheetName, neededRow, neededCol, optSpreadsheet) {
+  var ss = optSpreadsheet || ENV.SpreadsheetApp.openById(ENV.spreadsheetId);
   var sheet = ss.getSheetByName(sheetName);
   if (!sheet) throw appError('NOT_FOUND', '找不到工作表：' + sheetName);
 
@@ -605,12 +659,13 @@ function formatEssaysColumnText(col1) {
 }
 
 function rowArrayToUser(row, rowIdx) {
+  var bgState = normalizeBgThemesState(row[21]);
   return {
     rowIdx: rowIdx,
     uid: String(row[0] || ''),
     username: String(row[1] || ''),
     passwordHash: String(row[2] || ''),
-    sessionHashes: parseJsonSafe(row[3], []),
+    sessionHashes: parseJsonCell(row[3], []),
     displayName: String(row[4] || ''),
     timezone: String(row[5] || 'Asia/Taipei'),
     activeGroupId: String(row[6] || ''),
@@ -620,14 +675,16 @@ function rowArrayToUser(row, rowIdx) {
     streakLastDay: String(row[10] || ''),
     streakPrevCount: Number(row[11] || 0),
     streakPrevLastDay: String(row[12] || ''),
-    seeds: parseJsonSafe(row[13], {}),
-    limitedSeeds: parseJsonSafe(row[14], {}),
-    milestones: parseJsonSafe(row[15], []),
-    dex: parseJsonSafe(row[16], []),
+    seeds: parseJsonCell(row[13], {}),
+    limitedSeeds: parseJsonCell(row[14], {}),
+    milestones: parseJsonCell(row[15], []),
+    dex: parseJsonCell(row[16], []),
     lastCardStyle: String(row[17] || 'card1'),
-    makeupDays: parseJsonSafe(row[18], []),
+    makeupDays: parseJsonCell(row[18], []),
     createdAt: Number(row[19] || 0),
-    updatedAt: Number(row[20] || 0)
+    updatedAt: Number(row[20] || 0),
+    unlockedBgThemes: bgState.unlocked,
+    activeBgTheme: bgState.active
   };
 }
 
@@ -653,7 +710,11 @@ function userToRowArray(u) {
     u.lastCardStyle || 'card1',
     JSON.stringify(u.makeupDays || []),
     Number(u.createdAt || 0),
-    Number(u.updatedAt || 0)
+    Number(u.updatedAt || 0),
+    JSON.stringify({
+      unlocked: u.unlockedBgThemes || ['morning'],
+      active: u.activeBgTheme || 'morning'
+    })
   ];
 }
 
@@ -665,12 +726,12 @@ function rowArrayToGroup(row, rowIdx) {
     ownerUid: String(row[2] || ''),
     status: String(row[3] || 'active'),
     inviteCode: String(row[4] || ''),
-    memberUids: parseJsonSafe(row[5], []),
-    formerMemberUids: parseJsonSafe(row[6], []),
+    memberUids: parseJsonCell(row[5], []),
+    formerMemberUids: parseJsonCell(row[6], []),
     timezone: String(row[7] || 'Asia/Taipei'),
     themeVoteMonth: String(row[8] || ''),
-    themeVotes: parseJsonSafe(row[9], {}),
-    makeupDays: parseJsonSafe(row[10], []),
+    themeVotes: parseJsonCell(row[9], {}),
+    makeupDays: parseJsonCell(row[10], []),
     createdAt: Number(row[11] || 0),
     updatedAt: Number(row[12] || 0)
   };
@@ -695,7 +756,7 @@ function groupToRowArray(g) {
 }
 
 function rowArrayToGarden(row, rowIdx) {
-  var items = parseJsonSafe(row[9], { plants: {}, decor: {} });
+  var items = parseJsonCell(row[9], { plants: {}, decor: {} });
   if (!items.plants) items.plants = {};
   if (!items.decor) items.decor = {};
   return {
@@ -732,8 +793,30 @@ function gardenToRowArray(g) {
   ];
 }
 
+function buildTableSpec(name, toRowArray) {
+  var colCount = HEADERS[name].length;
+  var endCol = colToLetter(colCount);
+  return {
+    name: name,
+    colCount: colCount,
+    endCol: endCol,
+    loadRange: name + '!A1:' + endCol,
+    toRowArray: toRowArray
+  };
+}
+
+const TABLE_SPECS = {
+  users: buildTableSpec('users', userToRowArray),
+  groups: buildTableSpec('groups', groupToRowArray),
+  gardens: buildTableSpec('gardens', gardenToRowArray)
+};
+
 function loadCoreTables() {
-  var vRanges = valuesBatchGet(['users!A1:U', 'groups!A1:M', 'gardens!A1:L']);
+  var vRanges = valuesBatchGet([
+    TABLE_SPECS.users.loadRange,
+    TABLE_SPECS.groups.loadRange,
+    TABLE_SPECS.gardens.loadRange
+  ]);
   var userVals = (vRanges[0] && vRanges[0].values) || [];
   var groupVals = (vRanges[1] && vRanges[1].values) || [];
   var gardenVals = (vRanges[2] && vRanges[2].values) || [];
@@ -781,18 +864,40 @@ function loadCoreTables() {
   };
 }
 
-function writeRowUpdates(tabName, rowEntries, endColLetter) {
+function commitMutations(mutations) {
+  if (!mutations) return;
+  var tableOrder = ['users', 'groups', 'gardens'];
+  var activeTables = [];
   var items = [];
-  var maxRow = 0;
-  for (var i = 0; i < rowEntries.length; i++) {
-    var entry = rowEntries[i];
-    if (entry.rowIdx > maxRow) maxRow = entry.rowIdx;
-    items.push({
-      range: tabName + '!A' + entry.rowIdx + ':' + endColLetter + entry.rowIdx,
-      values: [entry.values]
+
+  for (var t = 0; t < tableOrder.length; t++) {
+    var key = tableOrder[t];
+    var list = mutations[key];
+    if (!list || !list.length) continue;
+    var deduped = new Map();
+    var maxRow = 0;
+    for (var i = 0; i < list.length; i++) {
+      var rec = list[i];
+      if (!rec || !rec.rowIdx) continue;
+      deduped.set(rec.rowIdx, rec);
+      if (rec.rowIdx > maxRow) maxRow = rec.rowIdx;
+    }
+    if (maxRow <= 0) continue;
+    activeTables.push({ spec: TABLE_SPECS[key], maxRow: maxRow, deduped: deduped });
+  }
+
+  if (!activeTables.length) return;
+  var ss = ENV.SpreadsheetApp.openById(ENV.spreadsheetId);
+  for (var a = 0; a < activeTables.length; a++) {
+    var entry = activeTables[a];
+    ensureSheetCapacity(entry.spec.name, entry.maxRow, entry.spec.colCount, ss);
+    entry.deduped.forEach(function (rec, rowIdx) {
+      items.push({
+        range: entry.spec.name + '!A' + rowIdx + ':' + entry.spec.endCol + rowIdx,
+        values: [entry.spec.toRowArray(rec)]
+      });
     });
   }
-  if (maxRow > 0) ensureSheetCapacity(tabName, maxRow, 1);
   valuesBatchWrite(items);
 }
 
@@ -880,7 +985,7 @@ function fetchEssaysMatrixSlice(index, targetUids, rowFilterFn) {
       if (!rawCell) continue;
       var dk = rowToDay[meta.startRow + r];
       if (!dk) continue;
-      out[meta.uid][dk] = parseJsonSafe(rawCell, []);
+      out[meta.uid][dk] = parseJsonCell(rawCell, []);
     }
   }
   return out;
@@ -894,7 +999,28 @@ function readSingleEssayCell(index, dayKey, uid) {
   var vRanges = valuesBatchGet(['essays!' + colLtr + rowIdx]);
   var vals = vRanges[0] && vRanges[0].values;
   var raw = vals && vals[0] && vals[0][0];
-  return { rowIdx: rowIdx, col1: col1, list: raw ? parseJsonSafe(raw, []) : [] };
+  return { rowIdx: rowIdx, col1: col1, list: raw ? parseJsonCell(raw, []) : [] };
+}
+
+function summarizeUserEssayDay(list, madeUp) {
+  var arr = list || [];
+  var words = 0;
+  var lastAt = 0;
+  var seedsGiven = 0;
+  for (var j = 0; j < arr.length; j++) {
+    words += Number(arr[j].wordCount || 0);
+    if (Number(arr[j].createdAt || 0) > lastAt) lastAt = Number(arr[j].createdAt || 0);
+    if (!arr[j].groupId && arr[j].reward && arr[j].reward.type === 'seed') {
+      seedsGiven += 1;
+    }
+  }
+  return {
+    essays: arr.length,
+    words: words,
+    lastEssayAt: lastAt,
+    madeUp: Boolean(madeUp),
+    seedsGiven: seedsGiven
+  };
 }
 
 function computeUserAndGroupDays(user, group, matrixByUid) {
@@ -903,22 +1029,11 @@ function computeUserAndGroupDays(user, group, matrixByUid) {
   var myDaysKeys = Object.keys(myCells);
   for (var i = 0; i < myDaysKeys.length; i++) {
     var dk = myDaysKeys[i];
-    var arr = myCells[dk] || [];
-    var words = 0;
-    var lastAt = 0;
-    var seedsGiven = 0;
-    for (var j = 0; j < arr.length; j++) {
-      words += Number(arr[j].wordCount || 0);
-      if (Number(arr[j].createdAt || 0) > lastAt) lastAt = Number(arr[j].createdAt || 0);
-      if (!arr[j].groupId && arr[j].reward && arr[j].reward.type === 'seed') {
-        seedsGiven += 1;
-      }
-    }
-    userDays[dk] = { essays: arr.length, words: words, lastEssayAt: lastAt, madeUp: false, seedsGiven: seedsGiven };
+    userDays[dk] = summarizeUserEssayDay(myCells[dk], false);
   }
   for (var m = 0; m < user.makeupDays.length; m++) {
     var mdk = user.makeupDays[m];
-    if (!userDays[mdk]) userDays[mdk] = { essays: 0, words: 0, lastEssayAt: 0, madeUp: true, seedsGiven: 0 };
+    if (!userDays[mdk]) userDays[mdk] = summarizeUserEssayDay([], true);
     else userDays[mdk].madeUp = true;
   }
 
@@ -995,7 +1110,9 @@ function toUserDto(u) {
     milestones: u.milestones,
     dex: u.dex,
     lastCardStyle: u.lastCardStyle,
-    makeupDays: u.makeupDays
+    makeupDays: u.makeupDays,
+    unlockedBgThemes: u.unlockedBgThemes || ['morning'],
+    activeBgTheme: u.activeBgTheme || 'morning'
   };
 }
 
@@ -1152,6 +1269,49 @@ function collectVisibleEssays(matrixByUid, user, group, allowedMonthsSet, userBy
   return essays;
 }
 
+function hasOlderVisibleEssays(essayIndex, user, group, recent, minEvalDay, matrixByUid) {
+  var hasCandidateRows = essayIndex.rowEntries.some(function (e) {
+    return e.dayKey.slice(0, 7) < recent.oldestMonth;
+  });
+  if (!hasCandidateRows) return false;
+
+  var visibleUids = [user.uid];
+  if (group) {
+    for (var i = 0; i < group.memberUids.length; i++) {
+      if (group.memberUids[i] !== user.uid) visibleUids.push(group.memberUids[i]);
+    }
+  }
+
+  function hasVisibleOlderInMatrix(mat) {
+    for (var u = 0; u < visibleUids.length; u++) {
+      var aUid = visibleUids[u];
+      var cells = mat[aUid];
+      if (!cells) continue;
+      var dks = Object.keys(cells);
+      for (var d = 0; d < dks.length; d++) {
+        var dk = dks[d];
+        if (dk.slice(0, 7) >= recent.oldestMonth) continue;
+        var arr = cells[dk] || [];
+        if (aUid === user.uid) {
+          if (arr.length > 0) return true;
+        } else if (group) {
+          for (var k = 0; k < arr.length; k++) {
+            if (arr[k].groupId === group.groupId && !arr[k].private) return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  if (hasVisibleOlderInMatrix(matrixByUid)) return true;
+
+  var olderMatrix = fetchEssaysMatrixSlice(essayIndex, visibleUids, function (dk) {
+    return dk.slice(0, 7) < recent.oldestMonth && dk < minEvalDay;
+  });
+  return hasVisibleOlderInMatrix(olderMatrix);
+}
+
 function computeBootstrapState(tables, essayIndex, user, essayMonthsLimit, nowMs) {
   var group = user.activeGroupId ? tables.groupById[user.activeGroupId] : null;
   var gardens = getRelevantGardensForUser(tables, user, group);
@@ -1170,11 +1330,7 @@ function computeBootstrapState(tables, essayIndex, user, essayMonthsLimit, nowMs
   });
 
   var days = computeUserAndGroupDays(user, group, matrixByUid);
-
-  // 以 essays!A2:A 日期列做 O(1) 近似判斷，省去跨欄全掃成本（僅影響歷史月份展開按鈕顯示）
-  var hasMoreEssayHistory = essayIndex.rowEntries.some(function (e) {
-    return e.dayKey.slice(0, 7) < recent.oldestMonth;
-  });
+  var hasMoreEssayHistory = hasOlderVisibleEssays(essayIndex, user, group, recent, minEvalDay, matrixByUid);
 
   // 檢查是否需要寫回（團體開票／跨月自動開島／植物成熟或連缺>=3天死亡懶回寫）
   var needsGroupVoteOpen = false;
@@ -1207,7 +1363,6 @@ function computeBootstrapState(tables, essayIndex, user, essayMonthsLimit, nowMs
     if (gd.status === 'snapshot') continue;
     var gTz = gd.ownerType === 'group' && group ? group.timezone : user.timezone;
     var gdToday = getGameDayKey(nowMs, gTz, GAME_CONFIG.dayBoundaryHour);
-    var gdYesterday = addDays(gdToday, -1);
     var srcDays = gd.ownerType === 'group' ? days.groupDays : days.userDays;
 
     var plants = Object.values(gd.items.plants || {});
@@ -1221,17 +1376,12 @@ function computeBootstrapState(tables, essayIndex, user, essayMonthsLimit, nowMs
         pl.hadWilt = Boolean(ev.hadWilt);
         pl.finalLevel = 5;
         changed = true;
-      } else if (ev.stage === 'dead') {
-        // 僅在連缺 >= 3 天（模擬補寫昨天仍為 dead）時才永久寫回 finalStage='dead'
-        var simDays = Object.assign({}, srcDays);
-        simDays[gdYesterday] = Object.assign({}, srcDays[gdYesterday] || {}, { madeUp: true });
-        var simEv = evaluatePlantState(pl, simDays, gdToday, gd.ownerType);
-        if (simEv.stage === 'dead') {
-          pl.finalStage = 'dead';
-          pl.hadWilt = true;
-          pl.finalLevel = ev.level;
-          changed = true;
-        }
+      } else if (ev.stage === 'dead' && !canRescuePlantByMakeUp(pl, srcDays, gdToday, gd.ownerType)) {
+        // 僅在連缺 >= 3 天（已過補寫昨天救活視窗）時才永久寫回 finalStage='dead'
+        pl.finalStage = 'dead';
+        pl.hadWilt = true;
+        pl.finalLevel = ev.level;
+        changed = true;
       }
     }
     if (changed) plantMutations.push(gd);
@@ -1279,7 +1429,7 @@ function buildGardenRecord(tables, opts) {
 }
 
 function archiveActivePersonalGardens(tables, uid, nowMs, rejectSameMonth) {
-  var updates = [];
+  var archived = [];
   for (var i = 0; i < tables.gardens.length; i++) {
     var gd = tables.gardens[i];
     if (gd.ownerType === 'personal' && gd.ownerId === uid && gd.status === 'active') {
@@ -1288,10 +1438,10 @@ function archiveActivePersonalGardens(tables, uid, nowMs, rejectSameMonth) {
       }
       gd.status = 'archived';
       gd.updatedAt = nowMs;
-      updates.push({ rowIdx: gd.rowIdx, values: gardenToRowArray(gd) });
+      archived.push(gd);
     }
   }
-  return updates;
+  return archived;
 }
 
 function applyBootstrapWritebacksLocked(tables, state, nowMs) {
@@ -1303,7 +1453,7 @@ function applyBootstrapWritebacksLocked(tables, state, nowMs) {
     var winTheme = resolveGroupThemeVote(state.group.groupId, state.currentGroupMonth, votes);
     state.activeGroupGarden.status = 'archived';
     state.activeGroupGarden.updatedAt = nowMs;
-    gardenUpdates.push({ rowIdx: state.activeGroupGarden.rowIdx, values: gardenToRowArray(state.activeGroupGarden) });
+    gardenUpdates.push(state.activeGroupGarden);
 
     var newGarden = buildGardenRecord(tables, {
       prefixUid: state.group.ownerUid,
@@ -1314,7 +1464,7 @@ function applyBootstrapWritebacksLocked(tables, state, nowMs) {
       nowMs: nowMs
     });
     state.gardens.push(newGarden);
-    gardenUpdates.push({ rowIdx: newGarden.rowIdx, values: gardenToRowArray(newGarden) });
+    gardenUpdates.push(newGarden);
 
     state.group.themeVoteMonth = '';
     state.group.themeVotes = {};
@@ -1328,7 +1478,7 @@ function applyBootstrapWritebacksLocked(tables, state, nowMs) {
   }
 
   if ((state.needsGroupVoteOpen || state.needsGroupMonthTransition) && state.group) {
-    groupUpdates.push({ rowIdx: state.group.rowIdx, values: groupToRowArray(state.group) });
+    groupUpdates.push(state.group);
   }
 
   for (var i = 0; i < state.plantMutations.length; i++) {
@@ -1337,11 +1487,10 @@ function applyBootstrapWritebacksLocked(tables, state, nowMs) {
       continue; // already queued above
     }
     gd.updatedAt = nowMs;
-    gardenUpdates.push({ rowIdx: gd.rowIdx, values: gardenToRowArray(gd) });
+    gardenUpdates.push(gd);
   }
 
-  if (groupUpdates.length) writeRowUpdates('groups', groupUpdates, 'M');
-  if (gardenUpdates.length) writeRowUpdates('gardens', gardenUpdates, 'L');
+  commitMutations({ groups: groupUpdates, gardens: gardenUpdates });
 }
 
 function finalizeBootstrapResponse(tables, user, state) {
@@ -1426,20 +1575,6 @@ function assertGardenAccess(tables, user, gardenId) {
   return garden;
 }
 
-function isCellOccupied(garden, x, y, ignoreId) {
-  var nx = Number(x);
-  var ny = Number(y);
-  var plants = Object.values((garden.items && garden.items.plants) || {});
-  for (var i = 0; i < plants.length; i++) {
-    if (plants[i].id !== ignoreId && Number(plants[i].x) === nx && Number(plants[i].y) === ny) return true;
-  }
-  var decor = Object.values((garden.items && garden.items.decor) || {});
-  for (var j = 0; j < decor.length; j++) {
-    if (decor[j].id !== ignoreId && Number(decor[j].x) === nx && Number(decor[j].y) === ny) return true;
-  }
-  return false;
-}
-
 function parseStrictInt(val) {
   if (val === null || val === undefined || typeof val === 'boolean') return null;
   if (typeof val === 'string') {
@@ -1509,7 +1644,7 @@ function writeEssayCell(essayIndex, dayKey, uid, dayList) {
 }
 
 // ----------------------------------------------------------------------------
-// 9. 22 個 Action 處理器
+// 9. 24 個 Action 處理器
 // ----------------------------------------------------------------------------
 function handlePing() {
   return { pong: true };
@@ -1543,7 +1678,7 @@ function handleAuth(payload) {
     user = existing;
     if (!user.sessionHashes.includes(sessionHash)) user.sessionHashes.push(sessionHash);
     user.updatedAt = now;
-    writeRowUpdates('users', [{ rowIdx: user.rowIdx, values: userToRowArray(user) }], 'U');
+    commitMutations({ users: [user] });
   } else {
     isNewUser = true;
     var uid = normUsername.indexOf('u_test_') === 0 ? normUsername : makeId('u_', now);
@@ -1574,7 +1709,9 @@ function handleAuth(payload) {
       lastCardStyle: 'card1',
       makeupDays: [],
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      unlockedBgThemes: ['morning'],
+      activeBgTheme: 'morning'
     };
     tables.nextUserRow += 1;
     tables.users.push(user);
@@ -1597,8 +1734,7 @@ function handleAuth(payload) {
     formatEssaysColumnText(newCol1);
     valuesBatchWrite([{ range: 'essays!' + colToLetter(newCol1) + '1', values: [[uid]] }]);
 
-    writeRowUpdates('users', [{ rowIdx: user.rowIdx, values: userToRowArray(user) }], 'U');
-    writeRowUpdates('gardens', [{ rowIdx: initGarden.rowIdx, values: gardenToRowArray(initGarden) }], 'L');
+    commitMutations({ users: [user], gardens: [initGarden] });
   }
 
   var state = computeBootstrapState(tables, essayIndex, user, 2, now);
@@ -1618,7 +1754,7 @@ function handleLogout(payload, ctx) {
     return !timingSafeEqualStr(h, ctx.tokenHash);
   });
   u.updatedAt = ENV.nowMs();
-  writeRowUpdates('users', [{ rowIdx: u.rowIdx, values: userToRowArray(u) }], 'U');
+  commitMutations({ users: [u] });
   return { loggedOut: true };
 }
 
@@ -1682,7 +1818,7 @@ function handleUpdateDisplayName(payload, ctx) {
   var now = ENV.nowMs();
   ctx.user.displayName = name;
   ctx.user.updatedAt = now;
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ users: [ctx.user] });
   return { displayName: name, updatedAt: now };
 }
 
@@ -1835,7 +1971,7 @@ function handleSubmitEssay(payload, ctx) {
   var updatedDayList = myTodayList.concat([rawEssay]);
   // 先寫隨筆儲存格（內含 49,000 字元上限檢查，超限時不寫使用者列）
   writeEssayCell(essayIndex, dayKey, user.uid, updatedDayList);
-  writeRowUpdates('users', [{ rowIdx: user.rowIdx, values: userToRowArray(user) }], 'U');
+  commitMutations({ users: [user] });
 
   var days = computeUserAndGroupDays(user, target.group, Object.assign({}, todayMatrix, {
     [user.uid]: Object.assign({}, todayMatrix[user.uid] || {}, { [dayKey]: updatedDayList })
@@ -1894,28 +2030,12 @@ function handleUpdateEssay(payload, ctx) {
 
   writeEssayCell(essayIndex, dayKey, authorUid, cell.list);
   if (cardStyle) {
-    writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+    commitMutations({ users: [ctx.user] });
   }
 
-  var words = 0;
-  var lastAt = 0;
-  var seedsGiven = 0;
-  for (var i = 0; i < cell.list.length; i++) {
-    words += Number(cell.list[i].wordCount || 0);
-    if (Number(cell.list[i].createdAt || 0) > lastAt) lastAt = Number(cell.list[i].createdAt || 0);
-    if (!cell.list[i].groupId && cell.list[i].reward && cell.list[i].reward.type === 'seed') {
-      seedsGiven += 1;
-    }
-  }
   return {
     essay: buildEssayDto(target, authorUid, dayKey, ctx.tables.userByUid),
-    userDaysDay: {
-      essays: cell.list.length,
-      words: words,
-      lastEssayAt: lastAt,
-      madeUp: ctx.user.makeupDays.includes(dayKey),
-      seedsGiven: seedsGiven
-    }
+    userDaysDay: summarizeUserEssayDay(cell.list, ctx.user.makeupDays.includes(dayKey))
   };
 }
 
@@ -1989,13 +2109,13 @@ function handleMakeUpYesterday(payload, ctx) {
   user.streakPrevLastDay = repaired.prevLastDay || '';
   user.updatedAt = now;
 
-  writeRowUpdates('users', [{ rowIdx: user.rowIdx, values: userToRowArray(user) }], 'U');
-
+  var mutatedGroups = [];
   if (group && !group.makeupDays.includes(yesterdayKey)) {
     group.makeupDays.push(yesterdayKey);
     group.updatedAt = now;
-    writeRowUpdates('groups', [{ rowIdx: group.rowIdx, values: groupToRowArray(group) }], 'M');
+    mutatedGroups.push(group);
   }
+  commitMutations({ users: [user], groups: mutatedGroups });
 
   return { user: toUserDto(user), streak: toUserDto(user).streak, yesterdayKey: yesterdayKey };
 }
@@ -2049,8 +2169,7 @@ function handlePlantSeed(payload, ctx) {
   garden.updatedAt = now;
   ctx.user.updatedAt = now;
 
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ gardens: [garden], users: [ctx.user] });
 
   return { plant: plant, user: toUserDto(ctx.user) };
 }
@@ -2090,8 +2209,7 @@ function handleClearDeadPlant(payload, ctx) {
   delete garden.items.plants[plantId];
   garden.updatedAt = now;
 
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ gardens: [garden], users: [ctx.user] });
 
   return { plantId: plantId, energy: ctx.user.energy };
 }
@@ -2121,8 +2239,7 @@ function handleBuyAndPlaceDecor(payload, ctx) {
   garden.items.decor[did] = decor;
   garden.updatedAt = now;
 
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ gardens: [garden], users: [ctx.user] });
 
   return { decor: decor, energy: ctx.user.energy };
 }
@@ -2139,7 +2256,7 @@ function handleRemoveDecor(payload, ctx) {
 
   delete garden.items.decor[decorId];
   garden.updatedAt = ENV.nowMs();
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
+  commitMutations({ gardens: [garden] });
 
   return { decorId: decorId };
 }
@@ -2169,7 +2286,7 @@ function handleMoveGridItem(payload, ctx) {
   obj.x = coords.nx;
   obj.y = coords.ny;
   garden.updatedAt = ENV.nowMs();
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
+  commitMutations({ gardens: [garden] });
 
   return { kind: kind, itemId: itemId, x: coords.nx, y: coords.ny };
 }
@@ -2191,7 +2308,7 @@ function handleDecomposeSeed(payload, ctx) {
   ctx.user.energy += gain;
   ctx.user.updatedAt = ENV.nowMs();
 
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ users: [ctx.user] });
   return { energy: ctx.user.energy, seeds: ctx.user.seeds };
 }
 
@@ -2215,8 +2332,7 @@ function handleExpandGarden(payload, ctx) {
   garden.size += 1;
   garden.updatedAt = now;
 
-  writeRowUpdates('gardens', [{ rowIdx: garden.rowIdx, values: gardenToRowArray(garden) }], 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ gardens: [garden], users: [ctx.user] });
 
   return { garden: toGardenDto(garden), energy: ctx.user.energy };
 }
@@ -2233,7 +2349,8 @@ function handleCreateGroup(payload, ctx) {
   var now = ENV.nowMs();
   var tz = ctx.user.timezone || 'Asia/Taipei';
   var todayKey = getGameDayKey(now, tz, GAME_CONFIG.dayBoundaryHour);
-  var gardenUpdates = archiveActivePersonalGardens(ctx.tables, ctx.user.uid, now);
+  var archivedGardens = archiveActivePersonalGardens(ctx.tables, ctx.user.uid, now);
+  var gardenUpdates = archivedGardens.slice();
 
   var isTest = isTestUid(ctx.user.uid);
   var grpId = makeId(isTest ? 'grp_test_' : 'grp_', now);
@@ -2264,19 +2381,17 @@ function handleCreateGroup(payload, ctx) {
     theme: theme,
     nowMs: now
   });
-  gardenUpdates.push({ rowIdx: newGarden.rowIdx, values: gardenToRowArray(newGarden) });
+  gardenUpdates.push(newGarden);
 
   ctx.user.activeGroupId = grpId;
   ctx.user.updatedAt = now;
 
-  writeRowUpdates('groups', [{ rowIdx: newGroup.rowIdx, values: groupToRowArray(newGroup) }], 'M');
-  writeRowUpdates('gardens', gardenUpdates, 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ groups: [newGroup], gardens: gardenUpdates, users: [ctx.user] });
 
   return {
     group: toGroupDto(newGroup),
     garden: toGardenDto(newGarden),
-    archivedPersonalGardenId: gardenUpdates.length > 1 ? gardenUpdates[0].values[0] : null
+    archivedPersonalGardenId: archivedGardens.length ? archivedGardens[0].gardenId : null
   };
 }
 
@@ -2306,9 +2421,7 @@ function handleJoinGroup(payload, ctx) {
   ctx.user.activeGroupId = group.groupId;
   ctx.user.updatedAt = now;
 
-  writeRowUpdates('groups', [{ rowIdx: group.rowIdx, values: groupToRowArray(group) }], 'M');
-  if (gardenUpdates.length) writeRowUpdates('gardens', gardenUpdates, 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ groups: [group], gardens: gardenUpdates, users: [ctx.user] });
 
   var essayIndex = loadEssaysIndex();
   var state = computeBootstrapState(ctx.tables, essayIndex, ctx.user, 2, now);
@@ -2381,7 +2494,7 @@ function handleLeaveGroup(payload, ctx) {
       },
       nowMs: now
     });
-    gardenUpdates.push({ rowIdx: snapshotGarden.rowIdx, values: gardenToRowArray(snapshotGarden) });
+    gardenUpdates.push(snapshotGarden);
   }
 
   group.memberUids = group.memberUids.filter(function (id) { return id !== ctx.user.uid; });
@@ -2402,14 +2515,12 @@ function handleLeaveGroup(payload, ctx) {
     theme: newTheme,
     nowMs: now
   });
-  gardenUpdates.push({ rowIdx: newPersonalGarden.rowIdx, values: gardenToRowArray(newPersonalGarden) });
+  gardenUpdates.push(newPersonalGarden);
 
   ctx.user.activeGroupId = '';
   ctx.user.updatedAt = now;
 
-  writeRowUpdates('groups', [{ rowIdx: group.rowIdx, values: groupToRowArray(group) }], 'M');
-  writeRowUpdates('gardens', gardenUpdates, 'L');
-  writeRowUpdates('users', [{ rowIdx: ctx.user.rowIdx, values: userToRowArray(ctx.user) }], 'U');
+  commitMutations({ groups: [group], gardens: gardenUpdates, users: [ctx.user] });
 
   return {
     snapshotGarden: snapshotGarden ? toGardenDto(snapshotGarden) : null,
@@ -2442,7 +2553,7 @@ function handleCastThemeVote(payload, ctx) {
   group.themeVotes[ctx.user.uid] = theme;
   group.updatedAt = now;
 
-  writeRowUpdates('groups', [{ rowIdx: group.rowIdx, values: groupToRowArray(group) }], 'M');
+  commitMutations({ groups: [group] });
   return { themeVoteMonth: group.themeVoteMonth, themeVotes: group.themeVotes };
 }
 
@@ -2465,10 +2576,74 @@ function handleStartNewMonthGarden(payload, ctx) {
     theme: theme,
     nowMs: now
   });
-  gardenUpdates.push({ rowIdx: newGarden.rowIdx, values: gardenToRowArray(newGarden) });
+  gardenUpdates.push(newGarden);
 
-  writeRowUpdates('gardens', gardenUpdates, 'L');
+  commitMutations({ gardens: gardenUpdates });
   return { garden: toGardenDto(newGarden) };
+}
+
+function handleBuyBgTheme(payload, ctx) {
+  var themeId = String((payload && payload.themeId) || '').trim();
+  var theme = BG_THEME_MAP[themeId];
+  if (!theme) throw appError('NOT_FOUND', '找不到該天候背景商品');
+
+  var user = ctx.user;
+  if (!Array.isArray(user.unlockedBgThemes)) user.unlockedBgThemes = ['morning'];
+  if (!user.unlockedBgThemes.includes('morning')) user.unlockedBgThemes.unshift('morning');
+
+  var now = ENV.nowMs();
+  if (user.unlockedBgThemes.includes(themeId)) {
+    if (user.activeBgTheme !== themeId) {
+      user.activeBgTheme = themeId;
+      user.updatedAt = now;
+      commitMutations({ users: [user] });
+    }
+    return {
+      alreadyOwned: true,
+      energy: user.energy,
+      unlockedBgThemes: user.unlockedBgThemes,
+      activeBgTheme: user.activeBgTheme
+    };
+  }
+
+  if (user.energy < theme.cost) {
+    throw appError('INSUFFICIENT_ENERGY', '能量不足（需要 ' + theme.cost + ' 能量）');
+  }
+
+  user.energy -= theme.cost;
+  user.unlockedBgThemes.push(themeId);
+  user.activeBgTheme = themeId;
+  user.updatedAt = now;
+  commitMutations({ users: [user] });
+
+  return {
+    alreadyOwned: false,
+    energy: user.energy,
+    unlockedBgThemes: user.unlockedBgThemes,
+    activeBgTheme: user.activeBgTheme
+  };
+}
+
+function handleSetBgTheme(payload, ctx) {
+  var themeId = String((payload && payload.themeId) || '').trim();
+  if (!BG_THEME_MAP[themeId]) throw appError('VALIDATION_ERROR', '無效的天候背景主題');
+
+  var user = ctx.user;
+  if (!Array.isArray(user.unlockedBgThemes)) user.unlockedBgThemes = ['morning'];
+  if (!user.unlockedBgThemes.includes('morning')) user.unlockedBgThemes.unshift('morning');
+  if (!user.unlockedBgThemes.includes(themeId)) {
+    throw appError('FORBIDDEN', '尚未解鎖此天候背景');
+  }
+
+  if (user.activeBgTheme !== themeId) {
+    user.activeBgTheme = themeId;
+    user.updatedAt = ENV.nowMs();
+    commitMutations({ users: [user] });
+  }
+  return {
+    activeBgTheme: user.activeBgTheme,
+    unlockedBgThemes: user.unlockedBgThemes
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -2496,7 +2671,9 @@ const ACTION_HANDLERS = {
   joinGroup: { lock: true, auth: true, fn: handleJoinGroup },
   leaveGroup: { lock: true, auth: true, fn: handleLeaveGroup },
   castThemeVote: { lock: true, auth: true, fn: handleCastThemeVote },
-  startNewMonthGarden: { lock: true, auth: true, fn: handleStartNewMonthGarden }
+  startNewMonthGarden: { lock: true, auth: true, fn: handleStartNewMonthGarden },
+  buyBgTheme: { lock: true, auth: true, fn: handleBuyBgTheme },
+  setBgTheme: { lock: true, auth: true, fn: handleSetBgTheme }
 };
 
 function dispatchRequest(req) {
@@ -2536,13 +2713,26 @@ function doPost(e) {
   try {
     var raw = e && e.postData && e.postData.contents;
     if (!raw) throw appError('VALIDATION_ERROR', '缺少請求內容');
-    var req = JSON.parse(raw);
+    var req;
+    try {
+      req = JSON.parse(raw);
+    } catch (_parseErr) {
+      throw appError('VALIDATION_ERROR', '請求 JSON 格式錯誤');
+    }
     var data = dispatchRequest(req);
     return jsonOut({ ok: true, serverTimeMs: ENV.nowMs(), data: data });
   } catch (err) {
-    var code = (err && err.code) || 'VALIDATION_ERROR';
-    var msg = (err && err.message) || '系統發生未預期錯誤';
-    return jsonOut({ ok: false, serverTimeMs: ENV.nowMs(), code: code, message: msg });
+    if (err && err.isAppError && err.code) {
+      return jsonOut({ ok: false, serverTimeMs: ENV.nowMs(), code: err.code, message: err.message });
+    }
+    var rawMsg = String((err && err.message) || '');
+    if (typeof console !== 'undefined' && console.error) {
+      console.error('[doPost unexpected error]', err && err.stack ? err.stack : rawMsg);
+    }
+    if (/Quota exceeded|Rate Limit/i.test(rawMsg)) {
+      return jsonOut({ ok: false, serverTimeMs: ENV.nowMs(), code: 'LOCK_TIMEOUT', message: '伺服器配額暫時忙碌，請稍後再試' });
+    }
+    return jsonOut({ ok: false, serverTimeMs: ENV.nowMs(), code: 'INTERNAL_ERROR', message: '系統發生未預期錯誤，請稍後再試' });
   }
 }
 
@@ -2594,6 +2784,8 @@ if (typeof module !== 'undefined' && module.exports) {
     calcPlantLevel: calcPlantLevel,
     evaluatePlantState: evaluatePlantState,
     calculateBeauty: calculateBeauty,
-    resolveGroupThemeVote: resolveGroupThemeVote
+    resolveGroupThemeVote: resolveGroupThemeVote,
+    canRescuePlantByMakeUp: canRescuePlantByMakeUp,
+    isCellOccupied: isCellOccupied
   };
 }

@@ -33,7 +33,7 @@ flowchart LR
 
 > **靜態設定盤點摘要**：
 > - `game-config.json` 定義：`dayBoundaryHour: 4`、`minWords: 10`、`dailySeedCap: 3`、`seedBagCap: 30`、`homeEssayLimit: 10`、`rarityFormula: { cap: 100, offset: 10 }`、`pityThreshold: 10`、`decomposeEnergy`（`common: 2, rare: 5, epic: 10, legendary: 20`）、`dailyBaseEnergy: 10`、`streakMultipliers: [[1, 1], [7, 1.5], [30, 2]]`、`overflowWordsPerEnergy: 10`、`milestones: [7, 30, 100, 365]`、`clearWitheredCost: 5`、`makeUpCost: 30`、`regionSize: { personal: 5, group: 6 }`、`expansionCosts: [100, 250, 500, 800]`、`groupGrowthMultiplier: { "1": 1, "2": 1.5, "3": 2, "4": 2.5, "5": 3 }`、`maxGroupMembers: 5`、`beauty`（`rarityWeight: { common: 1, rare: 2, epic: 4, legendary: 8 }`、`decorDivisor: 10`、`witheredPenalty: 2`）以及 `spriteScale`。
-> - `catalog.json` 定義：3 個主題（`flowerbed`、`forest`、`oasis`）、46 種植物（每主題 12 種 + `common` 6 種 + `limited` 4 種）與 6 種裝飾品（`dec_lantern`、`dec_bench`、`dec_pond`、`dec_rock`、`dec_torii`、`dec_arch`）。
+> - `catalog.json` 定義：3 個主題（`flowerbed`、`forest`、`oasis`）、46 種植物（每主題 12 種 + `common` 6 種 + `limited` 4 種）、6 種裝飾品（`dec_lantern`、`dec_bench`、`dec_pond`、`dec_rock`、`dec_torii`、`dec_arch`）與 5 種動態天候背景（`morning` 預設免費、`sunset`、`night`、`rain`、`bubbles`）。
 
 ### 1.3 設計定位與 Google Sheets 硬限制
 
@@ -142,6 +142,7 @@ erDiagram
 | `makeup_days_json` | 純文字 (`@`) | `JSON Array` | `"[]"` | 個人執行過「補寫昨天」之日期陣列（`["2026-11-18"]`），用於衍生 `userDays.madeUp` |
 | `created_at` | 數值 (`0`) | `number` | 必填 | Unix 毫秒時間戳 |
 | `updated_at` | 數值 (`0`) | `number` | 必填 | Unix 毫秒時間戳 |
+| `bg_themes_json` | 純文字 (`@`) | `JSON Object` | `'{"unlocked":["morning"],"active":"morning"}'` | 使用者已解鎖與目前啟用之天候動態背景狀態 |
 
 ### 3.2 工作表 `groups`（小圈子團體主檔，僅開團才建 1 列）
 
@@ -338,7 +339,7 @@ erDiagram
    - 前端將 `sessionToken` 寫入 `localStorage['essay_garden_session_v1']`；除非使用者在設定頁主動點擊「登出」呼叫 `logout`（GAS 只從 `session_hashes_json` 移除該裝置雜湊，不影響其他裝置），否則重開瀏覽器或長時間閒置皆永久維持登入，不設逾期時間。
    - 若因換用測試表、清除帳號或手動吊銷導致任一 API 回傳 `AUTH_INVALID`，前端應自動清除本機 `essay_garden_session_v1` 並重新彈出帳密視窗。
 
-### 5.3 完整 Action 規格總表（共 22 個 Action）
+### 5.3 完整 Action 規格總表（共 24 個 Action）
 
 | Action | 鎖定 | Payload 參數 | 涉及工作表與核心處理邏輯 | 回傳 `data` |
 | :--- | :---: | :--- | :--- | :--- |
@@ -364,6 +365,8 @@ erDiagram
 | `leaveGroup` | 是 | `{ newPersonalTheme }` | 依當前活動團體 `gardens` 即時結算所有植物並凍結為 `frozen`，為本人建立一筆 `status: 'snapshot'` 個人 `gardens` 列；將 `currentUid` 從 `groups.member_uids_json` 移至 `former_member_uids_json`（若團內已無現任成員則將 `groups.status` 設為 `'archived'` 並清空 `invite_code`）；建立當月 `5×5` 個人 `gardens` 列；清空 `users.active_group_id` | `{ snapshotGarden, newPersonalGarden, user }` |
 | `castThemeVote` | 是 | `{ groupId, theme }` | 驗證為該團現任成員且當下處於投票期（`theme_vote_month` 非空）；更新 `groups.theme_votes_json[currentUid] = theme` | `{ themeVoteMonth, themeVotes }` |
 | `startNewMonthGarden` | 是 | `{ theme }` | 僅限個人模式使用：驗證本月尚未建立 `active` 個人 `gardens`（若有舊月 `active` 則轉 `archived`）；建立當月 `5×5` 個人 `gardens` | `{ garden }` |
+| `buyBgTheme` | 是 | `{ themeId }` | 驗證主題 ID、確認尚未解鎖（已擁有則不重扣僅套用）、驗證並扣除 `users.energy`、寫入 `users.bg_themes_json` | `{ alreadyOwned, energy, unlockedBgThemes, activeBgTheme }` |
+| `setBgTheme` | 是 | `{ themeId }` | 驗證主題 ID 與該主題已解鎖，更新 `users.bg_themes_json` 之啟用背景 | `{ activeBgTheme, unlockedBgThemes }` |
 
 > **`memberDirectory` 契約說明**：`bootstrap` 與 `joinGroup` 回傳的 `memberDirectory` 為 `{ [uid]: displayName }` 對照表，須涵蓋「目前團員 ＋ 前成員 ＋ 所屬花園內所有植物／裝飾／隨筆曾出現之作者 `uid`」，讓退團後在相簿、植物詳情與快照中仍能正確顯示「當初是誰種的／寫的」。
 
@@ -383,7 +386,8 @@ erDiagram
 | `GROUP_FULL` | 團體現任成員已達上限 5 人 |
 | `INVITE_NOT_FOUND` | 邀請碼不存在或該團體已封存 |
 | `CELL_LIMIT_EXCEEDED` | 單人單日 `essays` 儲存格序列化後超過 49,000 字元安全閾值 |
-| `NOT_FOUND` | 指定的 `gardenId`、`essayId`、`plantId` 或 `decorId` 不存在 |
+| `NOT_FOUND` | 指定的 `gardenId`、`essayId`、`plantId`、`decorId` 或背景商品不存在 |
+| `INTERNAL_ERROR` | 未預期之伺服器或底層儲存格資料格式異常（不外洩內部堆疊或細節） |
 
 ---
 
@@ -473,7 +477,7 @@ erDiagram
 
 | 工作表 | 10 位使用者（3 年） | 30 位使用者（3 年） | 100 位使用者（3 年） |
 | :--- | :--- | :--- | :--- |
-| **`users`**（21 欄） | 10 列（210 格） | 30 列（630 格） | 100 列（2,100 格） |
+| **`users`**（22 欄） | 10 列（220 格） | 30 列（660 格） | 100 列（2,200 格） |
 | **`groups`**（13 欄） | ~4 列（52 格） | ~10 列（130 格） | ~35 列（455 格） |
 | **`gardens`**（12 欄） | ~450 列（5,400 格） | ~1,350 列（16,200 格） | ~4,500 列（54,000 格） |
 | **`essays`** 矩陣（`1 + N` 欄） | ~1,095 列 × 11 欄（12,045 格） | ~1,095 列 × 31 欄（33,945 格） | ~1,095 列 × 101 欄（110,595 格） |

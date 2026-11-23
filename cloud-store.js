@@ -11,7 +11,7 @@ import {
   computePriorityBanner,
   selectCarouselEssays,
   orderEvaluatedRegions
-} from './engine.js?v=20261123d';
+} from './engine.js?v=20261123e';
 import {
   createMemoryStorage,
   DEMO_ESSAY_ID,
@@ -21,8 +21,8 @@ import {
   applyDemoEssayReaction,
   readPreferredCardStyle,
   writePreferredCardStyle
-} from './store.js?v=20261123d';
-import { CloudClient } from './cloud-client.js?v=20261123d';
+} from './store.js?v=20261123e';
+import { CloudClient } from './cloud-client.js?v=20261123e';
 
 export { CARD_STYLE_STORAGE_KEY };
 export const CLOUD_STATE_STORAGE_KEY = 'essay_garden_cloud_cache_v1';
@@ -475,16 +475,20 @@ export class CloudGardenStore {
     }
 
     const cachedUser = prevState?.users?.[uid] || this._loadCachedState()?.users?.[uid] || null;
+    const hasServerBgState = Array.isArray(userDto.unlockedBgThemes);
     const unlockedBgThemes = Array.from(
       new Set(
         [
           'morning',
-          ...(Array.isArray(cachedUser?.unlockedBgThemes) ? cachedUser.unlockedBgThemes : []),
-          ...(Array.isArray(userDto.unlockedBgThemes) ? userDto.unlockedBgThemes : [])
+          ...(hasServerBgState
+            ? userDto.unlockedBgThemes
+            : (Array.isArray(cachedUser?.unlockedBgThemes) ? cachedUser.unlockedBgThemes : []))
         ].filter((t) => typeof t === 'string' && t)
       )
     );
-    const candidateActiveBg = userDto.activeBgTheme || cachedUser?.activeBgTheme || 'morning';
+    const candidateActiveBg = hasServerBgState
+      ? (userDto.activeBgTheme || 'morning')
+      : (cachedUser?.activeBgTheme || 'morning');
     const activeBgTheme = unlockedBgThemes.includes(candidateActiveBg) ? candidateActiveBg : 'morning';
 
     writePreferredCardStyle(this.storage, userDto.lastCardStyle);
@@ -579,6 +583,12 @@ export class CloudGardenStore {
       this._recordPreferredCardStyle(userDto.lastCardStyle, user);
     }
     if (userDto.makeupDays) user.makeupDays = [...userDto.makeupDays];
+    if (Array.isArray(userDto.unlockedBgThemes)) {
+      user.unlockedBgThemes = Array.from(new Set(['morning', ...userDto.unlockedBgThemes]));
+    }
+    if (userDto.activeBgTheme) {
+      user.activeBgTheme = userDto.activeBgTheme;
+    }
 
     this.state.memberDirectory[uid] = user.displayName;
     for (const g of Object.values(this.state.gardens)) {
@@ -1110,14 +1120,30 @@ export class CloudGardenStore {
     return user.activeBgTheme || 'morning';
   }
 
-  // 切換啟用背景
-  setBgTheme(themeId) {
+  // 切換啟用背景（0ms 樂觀更新畫面，同步至雲端；若伺服器拒絕則自動回滾）
+  async setBgTheme(themeId) {
     const user = this.currentUser();
     const unlocked = this.getUnlockedBgThemes();
     if (!unlocked.includes(themeId)) return false;
+    const prevTheme = user.activeBgTheme || 'morning';
+    if (prevTheme === themeId) return true;
+
     user.activeBgTheme = themeId;
     this.notify();
-    return true;
+
+    try {
+      const res = await this.client.request('setBgTheme', { themeId });
+      if (Array.isArray(res?.unlockedBgThemes)) {
+        user.unlockedBgThemes = Array.from(new Set(['morning', ...res.unlockedBgThemes]));
+      }
+      user.activeBgTheme = res?.activeBgTheme || themeId;
+      this.notify();
+      return true;
+    } catch (err) {
+      user.activeBgTheme = prevTheme;
+      this.notify();
+      throw err;
+    }
   }
 
   // 商店花費能量購買解鎖背景（若無指定 cost 則自動自 catalog SSOT 查詢）
@@ -1132,11 +1158,16 @@ export class CloudGardenStore {
     if (user.energy < actualCost) {
       return { success: false, reason: `能量不足（需要 ${actualCost} 能量，目前持有 ${user.energy} 能量）` };
     }
-    user.energy -= actualCost;
-    user.unlockedBgThemes.push(themeId);
-    user.activeBgTheme = themeId;
+    const res = await this.client.request('buyBgTheme', { themeId });
+    if (res?.energy !== undefined) user.energy = Number(res.energy);
+    if (Array.isArray(res?.unlockedBgThemes)) {
+      user.unlockedBgThemes = Array.from(new Set(['morning', ...res.unlockedBgThemes]));
+    } else if (!user.unlockedBgThemes.includes(themeId)) {
+      user.unlockedBgThemes.push(themeId);
+    }
+    user.activeBgTheme = res?.activeBgTheme || themeId;
     this.notify();
-    return { success: true, alreadyOwned: false };
+    return { success: true, alreadyOwned: Boolean(res?.alreadyOwned) };
   }
 
   async createGroupGarden(groupName, theme) {

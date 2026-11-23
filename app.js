@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261123d';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261123d';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261123d';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123d';
-import { bgManager } from './bg-manager.js?v=20261123d';
+} from './engine.js?v=20261123e';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261123e';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261123e';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123e';
+import { bgManager } from './bg-manager.js?v=20261123e';
 
-const ASSET_VER = '20261123d';
+const ASSET_VER = '20261123e';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1836,8 +1836,12 @@ function renderGardenBgSelectorBar() {
 
   bar.querySelectorAll('[data-switch-bg]').forEach(btn => {
     btn.onclick = () => {
-      store.setBgTheme(btn.dataset.switchBg);
+      const res = store.setBgTheme(btn.dataset.switchBg);
       renderGardenBgSelectorBar();
+      Promise.resolve(res).catch(err => {
+        showToast(err?.message || '切換天候背景失敗');
+        renderGardenBgSelectorBar();
+      });
     };
   });
 }
@@ -2605,9 +2609,13 @@ function renderModal() {
 
     box.querySelectorAll('[data-apply-bg]').forEach(b => {
       b.onclick = () => {
-        store.setBgTheme(b.dataset.applyBg);
+        const res = store.setBgTheme(b.dataset.applyBg);
         showToast('已套用天候背景景致');
         renderApp();
+        Promise.resolve(res).catch(err => {
+          showToast(err?.message || '切換天候背景失敗');
+          renderApp();
+        });
       };
     });
 
