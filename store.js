@@ -12,7 +12,7 @@ import {
   evaluatePlantState,
   calculateBeauty,
   resolveGroupThemeVote
-} from './engine.js?v=20261123b';
+} from './engine.js?v=20261123c';
 
 export const DEMO_ESSAY_ID = 'essay_demo_welcome';
 export const DEMO_CARD_STYLE_KEY = 'essay_garden_demo_card_style_v1';
