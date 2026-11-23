@@ -9,10 +9,9 @@ const BG_STYLE_ID = 'essay-garden-dynamic-bg-styles';
 // 1. 動態 CSS 樣式定義（只在 DOMAdapter init 時注入一次）
 // =========================================================================
 const CSS_RULES = `
-  /* 強制圖層層疊上下文契約：後景在小島(z-10)之下，前景在小島(z-10)之上且低於隨筆(z-30) */
+  /* 強制圖層層疊上下文契約：後景在小島(z-10)之下，前景在小島(z-10)之上且低於隨筆與懸浮導覽 UI */
   #dynamic-bg-layer { z-index: 0 !important; pointer-events: none !important; }
   #dynamic-fg-layer { z-index: 25 !important; pointer-events: none !important; }
-  #full-floating-info, #home-floating-info, #garden-bottom-nav { z-index: 35 !important; }
 
   /* 背景主題漸層 */
   .bg-theme-morning {
@@ -81,55 +80,6 @@ const CSS_RULES = `
     animation: meteorFlyGlide var(--meteor-dur, 15s) cubic-bezier(0.15, 0.25, 0.2, 1) infinite var(--meteor-del, 0s) both;
     pointer-events: none;
     will-change: transform, opacity;
-  }
-  /* 向下相容既有類名 */
-  .anim-meteor-bolide {
-    opacity: 0;
-    transform: translate(220px, -244px) rotate(-48deg);
-    animation: meteorFlyGlide 18s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 2.4s both;
-    pointer-events: none;
-  }
-  .anim-meteor-mid-1 {
-    opacity: 0;
-    transform: translate(170px, -189px) rotate(-48deg);
-    animation: meteorFlyGlide 13.6s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 7.0s both;
-    pointer-events: none;
-  }
-  .anim-meteor-mid-2 {
-    opacity: 0;
-    transform: translate(170px, -189px) rotate(-48deg);
-    animation: meteorFlyGlide 15.2s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 1.0s both;
-    pointer-events: none;
-  }
-  .anim-meteor-faint-1 {
-    opacity: 0;
-    transform: translate(130px, -144px) rotate(-48deg);
-    animation: meteorFlyGlide 9.6s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 4.0s both;
-    pointer-events: none;
-  }
-  .anim-meteor-faint-2 {
-    opacity: 0;
-    transform: translate(130px, -144px) rotate(-48deg);
-    animation: meteorFlyGlide 11.0s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 8.4s both;
-    pointer-events: none;
-  }
-  .anim-meteor-faint-3 {
-    opacity: 0;
-    transform: translate(130px, -144px) rotate(-48deg);
-    animation: meteorFlyGlide 8.4s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 1.6s both;
-    pointer-events: none;
-  }
-  .anim-meteor-fly-1 {
-    opacity: 0;
-    transform: translate(220px, -244px) rotate(-48deg);
-    animation: meteorFlyGlide 18s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 2.4s both;
-    pointer-events: none;
-  }
-  .anim-meteor-fly-2 {
-    opacity: 0;
-    transform: translate(170px, -189px) rotate(-48deg);
-    animation: meteorFlyGlide 13.6s cubic-bezier(0.15, 0.25, 0.2, 1) infinite 7.0s both;
-    pointer-events: none;
   }
 
   /* 雨後彩虹 18秒天氣循環 */
@@ -201,8 +151,7 @@ const CSS_RULES = `
     pointer-events: none;
     will-change: top, transform;
   }
-  #app-container[data-screen="home"] .rainbow-stage-wrapper,
-  body[data-screen="home"] .rainbow-stage-wrapper {
+  #app-container[data-screen="home"] .rainbow-stage-wrapper {
     top: calc(48% - 30px) !important;
     transform: translateX(-50%) scale(0.80) !important;
   }
@@ -253,23 +202,20 @@ const CSS_RULES = `
     pointer-events: none;
   }
   /* 前景與後景統一粗細 (2.2px)，長度 44px，預設 opacity: 0 與 animation both 徹底杜絕切換停滯 */
-  .rain-bar {
+  .rain-bar, .rain-bar-fg {
     width: 44px;
     height: 2.2px;
     opacity: 0;
-    background: linear-gradient(to right, rgba(255, 255, 255, 0.75) 0%, rgba(56, 189, 248, 0.48) 45%, rgba(14, 165, 233, 0.22) 80%, transparent 100%);
-    box-shadow: 0 0 3px rgba(56, 189, 248, 0.25);
     border-radius: 9999px;
     animation: rainLocalGlide 2.2s linear infinite 0s both;
   }
+  .rain-bar {
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.75) 0%, rgba(56, 189, 248, 0.48) 45%, rgba(14, 165, 233, 0.22) 80%, transparent 100%);
+    box-shadow: 0 0 3px rgba(56, 189, 248, 0.25);
+  }
   .rain-bar-fg {
-    width: 44px;
-    height: 2.2px;
-    opacity: 0;
     background: linear-gradient(to right, rgba(255, 255, 255, 0.8) 0%, rgba(56, 189, 248, 0.52) 45%, rgba(14, 165, 233, 0.25) 80%, transparent 100%);
     box-shadow: 0 0 3px rgba(56, 189, 248, 0.28);
-    border-radius: 9999px;
-    animation: rainLocalGlide 2.2s linear infinite 0s both;
   }
 
   /* 肥皂泡漂浮外層容器：專責 Y 軸緩緩升騰（在隨機高度：島中心點高度 -460px ~ 標題區塊下緣 -760px 自然破裂淡出） */
@@ -295,11 +241,6 @@ const CSS_RULES = `
   }
   .bubble-wobbler {
     animation: soapBubbleWobbleInner 4.2s ease-in-out infinite alternate;
-    pointer-events: none;
-  }
-
-  /* 舊版相容類別 */
-  .anim-soap-bubble {
     pointer-events: none;
   }
 `;
@@ -391,7 +332,7 @@ export function makeSunsetCloudSvg(scale, opacity, id) {
 }
 
 export function makeMicroCrossStarSvg(size = 18, color = '#ffffff') {
-  const uid = Math.random().toString(36).substr(2, 4);
+  const uid = Math.random().toString(36).slice(2, 6);
   return `
     <svg viewBox="0 0 48 48" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none;">
       <defs>
@@ -417,7 +358,7 @@ export function makeMicroCrossStarSvg(size = 18, color = '#ffffff') {
  * - 尾端錐形漸隱光軌（白 -> 電光青藍 -> 寶藍 -> 透明深空）
  */
 export function makeMeteorSvg({ length = 150, isBolide = false, uid = null } = {}) {
-  const id = uid || Math.random().toString(36).substr(2, 5);
+  const id = uid || Math.random().toString(36).slice(2, 7);
   const headX = 14;
   const headY = 14;
   const totalW = length + 24;
@@ -500,22 +441,16 @@ export function makeExactMathRainbowSvg() {
     { r: 147, color: '#c084fc', opacity: 0.68, width: 16 }  // 夢幻粉紫
   ];
 
-  const paths = arcs.map(arc => {
-    const startX = (X0 - arc.r * cos15).toFixed(2);
-    const startY = (Y0 - arc.r * sin15).toFixed(2);
-    const endX   = (X0 + arc.r * cos15).toFixed(2);
-    const endY   = (Y0 - arc.r * sin15).toFixed(2);
-    return `<path d="M ${startX} ${startY} A ${arc.r} ${arc.r} 0 0 1 ${endX} ${endY}" stroke="${arc.color}" stroke-opacity="${arc.opacity}" stroke-width="${arc.width}" stroke-linecap="round"/>`;
-  }).join('\n');
+  const arcD = (r) => {
+    const startX = (X0 - r * cos15).toFixed(2);
+    const y = (Y0 - r * sin15).toFixed(2);
+    const endX = (X0 + r * cos15).toFixed(2);
+    return `M ${startX} ${y} A ${r} ${r} 0 0 1 ${endX} ${y}`;
+  };
 
-  const glowStartX = (X0 - 171 * cos15).toFixed(2);
-  const glowStartY = (Y0 - 171 * sin15).toFixed(2);
-  const glowEndX   = (X0 + 171 * cos15).toFixed(2);
-  const glowEndY   = (Y0 - 171 * sin15).toFixed(2);
-  const rimStartX  = (X0 - 200 * cos15).toFixed(2);
-  const rimStartY  = (Y0 - 200 * sin15).toFixed(2);
-  const rimEndX    = (X0 + 200 * cos15).toFixed(2);
-  const rimEndY    = (Y0 - 200 * sin15).toFixed(2);
+  const paths = arcs.map(arc =>
+    `<path d="${arcD(arc.r)}" stroke="${arc.color}" stroke-opacity="${arc.opacity}" stroke-width="${arc.width}" stroke-linecap="round"/>`
+  ).join('\n');
 
   return `
     <svg viewBox="0 0 400 250" class="w-full h-auto overflow-visible" style="pointer-events: none;">
@@ -535,13 +470,13 @@ export function makeExactMathRainbowSvg() {
       </defs>
       <g mask="url(#rainbowMask)" fill="none">
         <!-- 柔白光暈背襯（提升彩虹通透呼吸感） -->
-        <path d="M ${glowStartX} ${glowStartY} A 171 171 0 0 1 ${glowEndX} ${glowEndY}" stroke="#ffffff" stroke-width="58" stroke-opacity="0.35" filter="url(#rainbowFeather)"/>
+        <path d="${arcD(171)}" stroke="#ffffff" stroke-width="58" stroke-opacity="0.35" filter="url(#rainbowFeather)"/>
         <!-- 七彩高斯柔焦色彩環 -->
         <g filter="url(#rainbowFeather)">
           ${paths}
         </g>
         <!-- 頂緣微光輪廓 -->
-        <path d="M ${rimStartX} ${rimStartY} A 200 200 0 0 1 ${rimEndX} ${rimEndY}" stroke="#ffffff" stroke-width="3" stroke-opacity="0.55" filter="url(#rainbowFeather)"/>
+        <path d="${arcD(200)}" stroke="#ffffff" stroke-width="3" stroke-opacity="0.55" filter="url(#rainbowFeather)"/>
       </g>
     </svg>`;
 }
@@ -619,7 +554,7 @@ export function makeMoistureBokehHtml() {
  * - 外緣立體折射高光雙環
  */
 export function makeRealSoapBubbleSvg(size = 54) {
-  const uid = Math.random().toString(36).substr(2, 5);
+  const uid = Math.random().toString(36).slice(2, 7);
   return `
     <svg viewBox="0 0 100 100" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none; filter: drop-shadow(0 6px 16px rgba(56, 189, 248, 0.4)) drop-shadow(0 2px 6px rgba(192, 132, 252, 0.25));">
       <defs>
@@ -671,10 +606,10 @@ export function makeRealSoapBubbleSvg(size = 54) {
 // 3. 5 款代表圖 SVG（用於全螢幕頂部背景卡框與商店清單）
 // =========================================================================
 export function makeThumbnailSvg(themeId) {
-  switch (themeId) {
-    case 'morning':
-      return `
-        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+  const inner = (() => {
+    switch (themeId) {
+      case 'morning':
+        return `
           <rect width="40" height="40" fill="url(#tGradMorning)"/>
           <defs>
             <linearGradient id="tGradMorning" x1="0" y1="0" x2="0" y2="1">
@@ -682,11 +617,9 @@ export function makeThumbnailSvg(themeId) {
             </linearGradient>
           </defs>
           <circle cx="31" cy="9" r="6" fill="#fde047" opacity="0.9"/>
-          <path d="M 10 28 C 6 28 4 24 6 20 C 5 15 11 11 16 12 C 20 6 28 8 30 14 C 35 15 36 21 33 25 C 31 28 27 28 25 28 Z" fill="#ffffff" opacity="0.95"/>
-        </svg>`;
-    case 'sunset':
-      return `
-        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+          <path d="M 10 28 C 6 28 4 24 6 20 C 5 15 11 11 16 12 C 20 6 28 8 30 14 C 35 15 36 21 33 25 C 31 28 27 28 25 28 Z" fill="#ffffff" opacity="0.95"/>`;
+      case 'sunset':
+        return `
           <rect width="40" height="40" fill="url(#tGradSunset)"/>
           <defs>
             <linearGradient id="tGradSunset" x1="0" y1="0" x2="0" y2="1">
@@ -695,11 +628,9 @@ export function makeThumbnailSvg(themeId) {
           </defs>
           <circle cx="20" cy="24" r="8" fill="#fed7aa" opacity="0.95"/>
           <path d="M 4 33 C 12 30 28 30 36 33 Z" fill="#47265a" opacity="0.7"/>
-          <path d="M 8 26 C 14 20 26 21 32 26 Z" fill="#fed7aa" opacity="0.6"/>
-        </svg>`;
-    case 'night':
-      return `
-        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+          <path d="M 8 26 C 14 20 26 21 32 26 Z" fill="#fed7aa" opacity="0.6"/>`;
+      case 'night':
+        return `
           <rect width="40" height="40" fill="url(#tGradNight)"/>
           <defs>
             <linearGradient id="tGradNight" x1="0" y1="0" x2="0" y2="1">
@@ -717,11 +648,9 @@ export function makeThumbnailSvg(themeId) {
           <!-- 傾斜 -48° 璀璨流星（前端白熾星芒，尾端寶藍漸隱） -->
           <line x1="13" y1="29" x2="33" y2="9" stroke="url(#tGradMeteor)" stroke-width="2.2" stroke-linecap="round"/>
           <circle cx="13" cy="29" r="2.2" fill="#ffffff"/>
-          <circle cx="13" cy="29" r="4.0" fill="#38bdf8" opacity="0.7"/>
-        </svg>`;
-    case 'rain':
-      return `
-        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+          <circle cx="13" cy="29" r="4.0" fill="#38bdf8" opacity="0.7"/>`;
+      case 'rain':
+        return `
           <rect width="40" height="40" fill="url(#tGradRain)"/>
           <defs>
             <linearGradient id="tGradRain" x1="0" y1="0" x2="0" y2="1">
@@ -734,11 +663,9 @@ export function makeThumbnailSvg(themeId) {
           <path d="M 10 30 A 12 12 0 0 1 30 30" fill="none" stroke="#38bdf8" stroke-width="2.5" opacity="0.75"/>
           <!-- 雲隙斜光束 -->
           <line x1="30" y1="4" x2="16" y2="28" stroke="#ffffff" stroke-width="1.8" opacity="0.5" stroke-dasharray="2 2"/>
-          <line x1="20" y1="12" x2="17" y2="22" stroke="#ffffff" stroke-width="1.2" opacity="0.75"/>
-        </svg>`;
-    case 'bubbles':
-      return `
-        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+          <line x1="20" y1="12" x2="17" y2="22" stroke="#ffffff" stroke-width="1.2" opacity="0.75"/>`;
+      case 'bubbles':
+        return `
           <rect width="40" height="40" fill="url(#tGradBubbles)"/>
           <defs>
             <linearGradient id="tGradBubbles" x1="0" y1="0" x2="0" y2="1">
@@ -753,11 +680,15 @@ export function makeThumbnailSvg(themeId) {
           <!-- 立體泡泡晶球 -->
           <circle cx="16" cy="22" r="9" fill="url(#tBubbleSphere)" stroke="#ffffff" stroke-width="1.2"/>
           <path d="M 11 18 A 6 6 0 0 1 18 15" fill="none" stroke="#ffffff" stroke-width="1.2" stroke-linecap="round"/>
-          <circle cx="27" cy="14" r="6" fill="url(#tBubbleSphere)" stroke="#ffffff" stroke-width="1.0" opacity="0.85"/>
+          <circle cx="27" cy="14" r="6" fill="url(#tBubbleSphere)" stroke="#ffffff" stroke-width="1.0" opacity="0.85"/>`;
+      default:
+        return '';
+    }
+  })();
+  if (!inner) return '';
+  return `
+        <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">${inner}
         </svg>`;
-    default:
-      return '';
-  }
 }
 
 // 預設主題型錄（若 Store 尚未載入 catalog 則作為 fallback）
@@ -799,6 +730,15 @@ export class DOMAdapter {
     if (this._stage) {
       removeClasses.forEach(c => this._stage.classList.remove(c));
       this._stage.classList.add(className);
+    }
+  }
+
+  setStageScreen(screenName) {
+    if (!this._stage) return;
+    if (screenName) {
+      this._stage.dataset.screen = screenName;
+    } else {
+      delete this._stage.dataset.screen;
     }
   }
 
@@ -854,6 +794,7 @@ export class DOMAdapter {
 export class VirtualAdapter {
   constructor() {
     this.currentStageClass = '';
+    this.currentScreen = '';
     this.backNodes = [];
     this.foreNodes = [];
     this.intervals = new Map();
@@ -865,6 +806,10 @@ export class VirtualAdapter {
 
   setStageClass(className, removeClasses = []) {
     this.currentStageClass = className;
+  }
+
+  setStageScreen(screenName) {
+    this.currentScreen = screenName;
   }
 
   clearLayers() {
@@ -1006,14 +951,7 @@ export class BgManager {
    * 通知目前畫面（首頁 'home' 或全螢幕 'garden' 等），用於彩虹等自適應幾何瞬間切換
    */
   setScreen(screenName) {
-    this.currentScreen = screenName;
-    if (typeof document !== 'undefined') {
-      const stageEl = document.getElementById(this.adapter.stageId || 'app-container');
-      if (stageEl) {
-        stageEl.setAttribute('data-screen', screenName);
-      }
-      document.body.setAttribute('data-screen', screenName);
-    }
+    this.adapter.setStageScreen(screenName);
   }
 
   /**
@@ -1040,9 +978,6 @@ export class BgManager {
 
     // 啟動對應主題引擎
     switch (target.id) {
-      case 'morning':
-        this._startCloudEngine(false);
-        break;
       case 'sunset':
         this._startCloudEngine(true);
         break;
@@ -1089,7 +1024,7 @@ export class BgManager {
   }
 
   _spawnOneCloud(isSunset, initialOffsetPercent = null) {
-    const cloudId = 'c_' + Math.random().toString(36).substr(2, 7);
+    const cloudId = 'c_' + Math.random().toString(36).slice(2, 9);
     const cloudEl = this.adapter.createElement('div', 'absolute pointer-events-none');
     if (!cloudEl) return;
 

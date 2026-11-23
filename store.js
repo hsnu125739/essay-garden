@@ -9,68 +9,90 @@ import {
   advanceStreakOnWrite,
   repairStreakOnMakeUp,
   calcRequiredDays,
-  evaluatePlantState,
-  calculateBeauty,
-  resolveGroupThemeVote
-} from './engine.js?v=20261123c';
+  resolveGroupThemeVote,
+  evaluateRegionState,
+  canMakeUpYesterday,
+  canRescuePlantByMakeUp,
+  isCellOccupied,
+  computePriorityBanner,
+  selectCarouselEssays,
+  orderEvaluatedRegions
+} from './engine.js?v=20261123d';
 
 export const DEMO_ESSAY_ID = 'essay_demo_welcome';
-export const DEMO_CARD_STYLE_KEY = 'essay_garden_demo_card_style_v1';
-export const DEMO_REACTIONS_KEY = 'essay_garden_demo_reactions_v1';
+export const CARD_STYLE_STORAGE_KEY = 'essay_garden_card_style_v1';
+const DEMO_CARD_STYLE_KEY = 'essay_garden_demo_card_style_v1';
+const DEMO_REACTIONS_KEY = 'essay_garden_demo_reactions_v1';
 
-export function getDemoEssayCardStyle() {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      return localStorage.getItem(DEMO_CARD_STYLE_KEY) || 'card2';
-    }
-  } catch (e) {}
-  return 'card2';
+function normalizeStyleId(styleId) {
+  return typeof styleId === 'string' && styleId.trim() ? styleId.trim() : '';
 }
 
-export function saveDemoEssayCardStyle(styleId) {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(DEMO_CARD_STYLE_KEY, styleId);
-    }
-  } catch (e) {}
+function readDemoEssayCardStyle(storage) {
+  const saved = storage ? normalizeStyleId(storage.getItem(DEMO_CARD_STYLE_KEY)) : '';
+  return saved || 'card2';
 }
 
-export function getDemoEssayReactions() {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const raw = localStorage.getItem(DEMO_REACTIONS_KEY);
-      return raw ? JSON.parse(raw) : {};
-    }
-  } catch (e) {}
-  return {};
+export function writeDemoEssayCardStyle(storage, styleId) {
+  const cleaned = normalizeStyleId(styleId);
+  if (!storage || !cleaned) return;
+  storage.setItem(DEMO_CARD_STYLE_KEY, cleaned);
 }
 
-export function saveDemoEssayReactions(reactions) {
+function readDemoEssayReactions(storage) {
+  if (!storage) return {};
+  const raw = storage.getItem(DEMO_REACTIONS_KEY);
+  if (!raw) return {};
   try {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(DEMO_REACTIONS_KEY, JSON.stringify(reactions || {}));
-    }
-  } catch (e) {}
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
 }
 
-export function buildDemoWelcomeEssay(uid, displayName, todayKey, regionId = '') {
-  const yesterdayKey = addDays(todayKey, -1);
+export function applyDemoEssayReaction(storage, actorUid, reactionId) {
+  if (!actorUid) return null;
+  const reactions = readDemoEssayReactions(storage);
+  if (!reactionId || reactions[actorUid] === reactionId) {
+    delete reactions[actorUid];
+  } else {
+    reactions[actorUid] = reactionId;
+  }
+  if (storage) storage.setItem(DEMO_REACTIONS_KEY, JSON.stringify(reactions));
+  return reactions[actorUid] || null;
+}
+
+export function readPreferredCardStyle(storage, fallbackStyle = 'card2') {
+  const saved = storage ? normalizeStyleId(storage.getItem(CARD_STYLE_STORAGE_KEY)) : '';
+  return saved || fallbackStyle;
+}
+
+export function writePreferredCardStyle(storage, styleId) {
+  const cleaned = normalizeStyleId(styleId);
+  if (!storage || !cleaned) return;
+  storage.setItem(CARD_STYLE_STORAGE_KEY, cleaned);
+}
+
+export function buildDemoWelcomeEssay(createdAtMs, storage = null) {
+  const ts = Number.isFinite(Number(createdAtMs)) && Number(createdAtMs) > 0
+    ? Number(createdAtMs)
+    : (Date.now() - 86400000);
   const welcomeContent = '歡迎來到美地隨筆！\n每則寫滿 10 字以上即可抽種子；將種子栽種在島上陪你一同成長！\n累積能量還能解鎖裝飾、新背景以及擴建島嶼，開始一起記錄生活微光、經營美地吧！';
-  const createdAt = new Date(`${yesterdayKey}T20:00:00`).getTime() || (Date.now() - 86400000);
   return {
     id: DEMO_ESSAY_ID,
     isDemo: true,
     authorUid: 'guide_meidi',
     authorName: '美地嚮導',
-    regionId: regionId || '',
-    dayKey: yesterdayKey,
+    regionId: '',
+    dayKey: getGameDayKey(ts),
     content: welcomeContent,
     wordCount: countEssayWords(welcomeContent),
     private: false,
-    cardStyle: getDemoEssayCardStyle(),
-    reactions: getDemoEssayReactions(),
-    createdAt,
-    updatedAt: createdAt
+    cardStyle: readDemoEssayCardStyle(storage),
+    reactions: readDemoEssayReactions(storage),
+    createdAt: ts,
+    updatedAt: ts
   };
 }
 
@@ -160,12 +182,27 @@ export class GardenStore {
 
   resetAllData() {
     this.storage.removeItem(STORAGE_KEY);
+    this.storage.removeItem(DEMO_CARD_STYLE_KEY);
+    this.storage.removeItem(DEMO_REACTIONS_KEY);
+    this.storage.removeItem(CARD_STYLE_STORAGE_KEY);
     this.state = this.createInitialState();
     this.notify();
   }
 
   currentUser() {
     return this.state.users[this.state.currentUserId];
+  }
+
+  getMemberDisplayName(uid) {
+    if (!uid) return '旅人';
+    const garden = this.currentGarden();
+    if (garden?.members?.[uid]?.displayName) {
+      return garden.members[uid].displayName;
+    }
+    if (this.state.users?.[uid]?.displayName) {
+      return this.state.users[uid].displayName;
+    }
+    return '旅人';
   }
 
   getCurrentUserMultiplier() {
@@ -284,7 +321,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 38 * 86400000,
                   requiredDays: 3,
                   limited: false,
-                  level: 5,
                   finalStage: 'grown',
                   frozen: null
                 },
@@ -298,7 +334,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 34 * 86400000,
                   requiredDays: 3,
                   limited: false,
-                  level: 3,
                   finalStage: 'grown',
                   frozen: null
                 },
@@ -312,7 +347,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 32 * 86400000,
                   requiredDays: 2,
                   limited: false,
-                  level: 4,
                   finalStage: 'grown',
                   frozen: null
                 }
@@ -340,7 +374,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 6 * 86400000,
                   requiredDays: 5,
                   limited: false,
-                  level: 4,
                   finalStage: 'grown',
                   frozen: null
                 },
@@ -354,7 +387,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 4 * 86400000,
                   requiredDays: 3,
                   limited: false,
-                  level: 2,
                   finalStage: 'grown',
                   frozen: null
                 },
@@ -368,7 +400,6 @@ export class GardenStore {
                   plantedAt: Date.now() - 86000000,
                   requiredDays: 2,
                   limited: false,
-                  level: 1,
                   finalStage: null,
                   frozen: null
                 }
@@ -392,22 +423,10 @@ export class GardenStore {
     const region = garden.regions[regionId];
     if (!region) return null;
 
-    const uid = this.state.currentUserId;
-    const user = this.state.users[uid];
+    const user = this.currentUser();
     const todayKey = this.currentDayKey(garden);
     const daysSource = garden.type === 'personal' ? user.days : garden.days;
-
-    const plantsWithState = Object.values(region.plants || {}).map(p => {
-      const evalState = region.status === 'snapshot' && p.frozen
-        ? { ...p.frozen, miss: 0, finalStage: null }
-        : evaluatePlantState(p, daysSource, todayKey, garden.type);
-      return { ...p, evalState };
-    });
-
-    const decorList = Object.values(region.decor || {});
-    const beauty = calculateBeauty(plantsWithState, decorList, this.catalog, this.config);
-
-    return { region, plantsWithState, decorList, beauty, todayKey };
+    return evaluateRegionState(region, daysSource, todayKey, garden.type, this.catalog, this.config);
   }
 
   // 檢查換月與團體最後一天開票（data-model.md §6.4）
@@ -480,30 +499,20 @@ export class GardenStore {
   // 取得首頁隨筆輪播（跨花園自己的所有隨筆 + 目前團體公開隨筆，依時間新到舊）
   getCarouselEssays() {
     const uid = this.state.currentUserId;
-    const activeGid = this.state.users[uid]?.activeGardenId;
-    const merged = new Map();
-
-    for (const g of Object.values(this.state.gardens)) {
-      for (const e of (g.essays || [])) {
-        if (e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome') continue;
-        if (e.authorUid === uid) {
-          merged.set(e.id, e);
-        } else if (g.id === activeGid && !e.private) {
-          merged.set(e.id, e);
-        }
-      }
-    }
+    const activeGid = this.currentUser()?.activeGardenId;
+    const essays = selectCarouselEssays(this.state.gardens, uid, activeGid);
 
     // 示範隨筆寫死在前端，後端無資料；日期為昨天
     if (!uid || !uid.startsWith('u_test_')) {
       const garden = this.state.gardens[activeGid] || Object.values(this.state.gardens)[0];
       const todayKey = this.currentDayKey(garden);
-      const user = this.state.users[uid];
-      const demoEssay = buildDemoWelcomeEssay(uid, user?.displayName, todayKey, garden?.activeRegionId);
-      merged.set(demoEssay.id, demoEssay);
+      const yesterdayKey = addDays(todayKey, -1);
+      const demoTs = new Date(`${yesterdayKey}T20:00:00`).getTime() || (this.nowMs() - 86400000);
+      essays.push(buildDemoWelcomeEssay(demoTs, this.storage));
+      essays.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
     }
 
-    return Array.from(merged.values()).sort((a, b) => b.createdAt - a.createdAt);
+    return essays;
   }
 
   // 完成一篇隨筆（data-model.md §6.1）
@@ -607,8 +616,7 @@ export class GardenStore {
       garden.members[writerUid].lastDay = user.streak.lastDay;
     }
 
-    const validCardStyle = typeof cardStyle === 'string' && cardStyle.trim() ? cardStyle.trim() : null;
-    if (validCardStyle) user.lastCardStyle = validCardStyle;
+    const validCardStyle = this._recordPreferredCardStyle(cardStyle, user);
     const resolvedPrivate = isPrivate === undefined ? garden.type !== 'group' : Boolean(isPrivate);
 
     // 4. 建立隨筆文件
@@ -655,12 +663,12 @@ export class GardenStore {
       }
       target.content = newContent;
       target.wordCount = wordCount;
-      target.private = Boolean(isPrivate);
+      if (isPrivate !== undefined) {
+        target.private = Boolean(isPrivate);
+      }
       if (cardStyle !== undefined) {
         target.cardStyle = cardStyle;
-        if (typeof cardStyle === 'string' && cardStyle.trim()) {
-          user.lastCardStyle = cardStyle.trim();
-        }
+        this._recordPreferredCardStyle(cardStyle, user);
       }
       target.updatedAt = this.nowMs();
       this.notify();
@@ -669,8 +677,53 @@ export class GardenStore {
     throw new Error('找不到可編輯的隨筆');
   }
 
+  _recordPreferredCardStyle(styleId, user = this.currentUser()) {
+    const validStyle = normalizeStyleId(styleId);
+    if (!validStyle) return null;
+    writePreferredCardStyle(this.storage, validStyle);
+    if (user) user.lastCardStyle = validStyle;
+    return validStyle;
+  }
+
+  getPreferredCardStyle() {
+    return readPreferredCardStyle(this.storage, this.currentUser()?.lastCardStyle || 'card1');
+  }
+
+  setPreferredCardStyle(styleId) {
+    const validStyle = this._recordPreferredCardStyle(styleId);
+    if (!validStyle) return null;
+    this.notify();
+    return validStyle;
+  }
+
+  setEssayCardStyle(essayId, styleId) {
+    const validStyle = normalizeStyleId(styleId);
+    if (!validStyle) return null;
+    if (essayId === DEMO_ESSAY_ID || essayId === 'essay_welcome') {
+      writeDemoEssayCardStyle(this.storage, validStyle);
+      this.notify();
+      return validStyle;
+    }
+    this._recordPreferredCardStyle(validStyle);
+    for (const g of Object.values(this.state.gardens)) {
+      const target = (g.essays || []).find(e => e.id === essayId);
+      if (target && (!target.authorUid || target.authorUid === this.state.currentUserId)) {
+        target.cardStyle = validStyle;
+        target.updatedAt = this.nowMs();
+        break;
+      }
+    }
+    this.notify();
+    return validStyle;
+  }
+
   // 設定或取消隨筆反應（短按愛心／長按滑選其他反應，多人團體中的私密隨筆不開放反應）
   setEssayReaction(essayId, reactionId, actorUid = this.state.currentUserId) {
+    if (essayId === DEMO_ESSAY_ID || essayId === 'essay_welcome') {
+      const res = applyDemoEssayReaction(this.storage, actorUid, reactionId);
+      this.notify();
+      return res;
+    }
     for (const g of Object.values(this.state.gardens)) {
       const target = (g.essays || []).find(e => e.id === essayId);
       if (target) {
@@ -692,29 +745,7 @@ export class GardenStore {
 
   // 檢查昨天是否可補寫（個人昨天 essays == 0 且尚未 madeUp）
   canMakeUpYesterday() {
-    const uid = this.state.currentUserId;
-    const user = this.state.users[uid];
-    const garden = this.currentGarden();
-    const todayKey = this.currentDayKey(garden);
-    const yesterdayKey = addDays(todayKey, -1);
-    const yRec = user.days[yesterdayKey];
-    const notWritten = !yRec || (yRec.essays || 0) === 0;
-    const notMadeUp = !yRec || !yRec.madeUp;
-    return {
-      available: notWritten && notMadeUp,
-      canAfford: user.energy >= this.config.makeUpCost,
-      yesterdayKey,
-      cost: this.config.makeUpCost
-    };
-  }
-
-  hasStreakBrokenYesterday() {
-    const user = this.currentUser();
-    const todayKey = this.currentDayKey();
-    const dayBefore = addDays(todayKey, -2);
-    const s = user.streak;
-    if (s.lastDay === todayKey) return s.prevLastDay === dayBefore && (s.prevCount || 0) > 0;
-    return s.lastDay === dayBefore && (s.count || 0) > 0;
+    return canMakeUpYesterday(this.currentUser(), this.currentDayKey(), this.config);
   }
 
   canRescuePlantByMakeUp(gardenId, plant) {
@@ -722,13 +753,8 @@ export class GardenStore {
     const garden = this.state.gardens[gardenId];
     if (!garden) return false;
     const todayKey = this.currentDayKey(garden);
-    const yesterdayKey = addDays(todayKey, -1);
     const baseDays = garden.type === 'personal' ? this.currentUser().days : garden.days;
-    const simulatedDays = {
-      ...baseDays,
-      [yesterdayKey]: { ...(baseDays[yesterdayKey] || {}), madeUp: true }
-    };
-    return evaluatePlantState(plant, simulatedDays, todayKey, garden.type).stage !== 'dead';
+    return canRescuePlantByMakeUp(plant, baseDays, todayKey, garden.type);
   }
 
   // 執行補寫昨天（data-model.md §6.2）
@@ -770,15 +796,7 @@ export class GardenStore {
 
   // 嚴格檢查目標格子 (x, y) 是否已被任何植物或裝飾占用（同一位置絕對不可擺兩樣東西）
   isCellOccupied(region, x, y, ignoreItemId = null) {
-    const nx = Number(x);
-    const ny = Number(y);
-    const hasPlant = Object.values(region.plants || {}).some(
-      p => p.id !== ignoreItemId && Number(p.x) === nx && Number(p.y) === ny
-    );
-    const hasDecor = Object.values(region.decor || {}).some(
-      d => d.id !== ignoreItemId && Number(d.x) === nx && Number(d.y) === ny
-    );
-    return hasPlant || hasDecor;
+    return isCellOccupied(region, x, y, ignoreItemId);
   }
 
   // 種下種子或限定植物（data-model.md §6.3）
@@ -1149,8 +1167,7 @@ export class GardenStore {
 
   // 取得依時間由舊到新排序的所有區域清單（供花園島左右箭頭 ◀ ▶ 切換月份檢視）
   getOrderedRegionsList() {
-    const uid = this.state.currentUserId;
-    const user = this.state.users[uid];
+    const user = this.currentUser();
     const activeGarden = this.currentGarden();
     const list = [];
 
@@ -1167,58 +1184,21 @@ export class GardenStore {
       collect(activeGarden);
     }
 
-    // 依 createdAt 由舊到新排序，且讓目前 active 區域排在最後一個（最新）
-    list.sort((a, b) => {
-      const aActive = a.region.id === activeGarden.activeRegionId ? 1 : 0;
-      const bActive = b.region.id === activeGarden.activeRegionId ? 1 : 0;
-      if (aActive !== bActive) return aActive - bActive;
-      return (a.region.createdAt || 0) - (b.region.createdAt || 0);
-    });
-    return list;
+    return orderEvaluatedRegions(list, activeGarden?.activeRegionId);
   }
 
   // 取得頂部優先提示條（screens.md §2.3）
   getPriorityBanner() {
-    const uid = this.state.currentUserId;
     const garden = this.currentGarden();
     if (!garden || !garden.activeRegionId) return null;
 
     const evalActive = this.getEvaluatedRegion(garden.id, garden.activeRegionId);
-
-    // 1. 團體最後一天投票提醒
-    if (garden.type === 'group' && garden.themeVote && !garden.themeVote.votes[uid]) {
-      return {
-        type: 'vote',
-        text: `明天換月！點此投票選擇 ${garden.themeVote.month} 的團體主題區域`,
-        action: 'open_group'
-      };
-    }
-
-    // 2. 枯萎中植物搶救提醒（day_1 沒寫 -> day_2 枯萎；當天有寫隨筆即可恢復原等級，否則 day_3 死亡）
-    const witheringCount = evalActive.plantsWithState.filter(p => p.evalState.stage === 'withering').length;
-    if (witheringCount > 0) {
-      return {
-        type: 'wither_urgent',
-        text: `有 ${witheringCount} 株植物正在枯萎中！今天寫隨筆即可恢復原等級，否則明天將死亡`,
-        action: 'write'
-      };
-    }
-
-    // 3. 昨天沒寫可補寫提醒（含連勝中斷或剛跨入第 2 缺日枯死的可救活植物）
-    const makeUpInfo = this.canMakeUpYesterday();
-    const rescuableDead = makeUpInfo.available
-      ? evalActive.plantsWithState.filter(p => p.evalState.stage === 'dead' && this.canRescuePlantByMakeUp(garden.id, p)).length
-      : 0;
-    if (makeUpInfo.available && (this.hasStreakBrokenYesterday() || rescuableDead > 0)) {
-      return {
-        type: 'makeup',
-        text: rescuableDead > 0
-          ? `有 ${rescuableDead} 株植物剛枯死！今天可花 ${makeUpInfo.cost} 能量補寫昨天立即救活`
-          : `昨天沒寫隨筆！可花 ${makeUpInfo.cost} 能量補寫昨天，保住連續天數與植物成長進度`,
-        action: 'makeup'
-      };
-    }
-
-    return null;
+    return computePriorityBanner({
+      garden,
+      user: this.currentUser(),
+      evalActive,
+      todayKey: this.currentDayKey(garden),
+      config: this.config
+    });
   }
 }

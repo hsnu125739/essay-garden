@@ -4,11 +4,13 @@ import json
 import mimetypes
 import os
 import re
+import subprocess
 import threading
+from playwright._impl._driver import compute_driver_executable
 from playwright.sync_api import sync_playwright
 
 ROOT_DIR = r"d:\Antigravity workspaces\交通美地"
-ASSET_VER = "20261123c"
+ASSET_VER = "20261123d"
 
 
 def load_text(name):
@@ -20,6 +22,7 @@ cfg = json.loads(load_text("game-config.json"))
 cat = json.loads(load_text("catalog.json"))
 app_js = load_text("app.js")
 store_js = load_text("store.js")
+cloud_store_js = load_text("cloud-store.js")
 engine_js = load_text("engine.js")
 index_html = load_text("index.html")
 
@@ -43,15 +46,18 @@ assert "|| 100" not in engine_js and "200 /" not in engine_js, "engine.js must u
 # 版本號一致性檢查
 assert f"./app.js?v={ASSET_VER}" in index_html, f"index.html must reference app.js?v={ASSET_VER}"
 assert f"const ASSET_VER = '{ASSET_VER}';" in app_js, f"app.js ASSET_VER must be {ASSET_VER}"
-assert f"./engine.js?v={ASSET_VER}" in app_js and f"./store.js?v={ASSET_VER}" in app_js, f"app.js imports must use ?v={ASSET_VER}"
-assert f"./bg-manager.js?v={ASSET_VER}" in app_js, f"app.js must import bg-manager.js?v={ASSET_VER}"
+for mod in ("engine.js", "store.js", "cloud-store.js", "cloud-client.js", "bg-manager.js"):
+    assert f"./{mod}?v={ASSET_VER}" in app_js, f"app.js must import {mod}?v={ASSET_VER}"
 assert f"./engine.js?v={ASSET_VER}" in store_js, f"store.js import must use ?v={ASSET_VER}"
+for mod in ("engine.js", "store.js", "cloud-client.js"):
+    assert f"./{mod}?v={ASSET_VER}" in cloud_store_js, f"cloud-store.js must import {mod}?v={ASSET_VER}"
 
 # 動態背景深模組契約與圖層檢查
 assert 'id="dynamic-bg-layer"' in index_html, "index.html must define #dynamic-bg-layer"
 assert 'id="dynamic-fg-layer"' in index_html, "index.html must define #dynamic-fg-layer"
 assert 'id="garden-bg-selector-bar"' in index_html, "index.html must define #garden-bg-selector-bar"
-assert "bgManager.setTheme" in app_js, "app.js must invoke bgManager.setTheme as single entry point"
+assert "bgManager.init" in app_js and "store.setBgTheme" in app_js, "app.js must bind bgManager.init and route theme switches via store.setBgTheme"
+assert "bgManager.setTheme" not in app_js, "app.js must not call dead bgManager.setTheme fallback"
 
 # 架構封裝契約（Seam & Locality）與清理規則檢查
 assert "store.notify()" not in app_js, "app.js must not call store.notify() directly"
@@ -168,7 +174,8 @@ try:
         unit_page.goto(f"{base_url}/index.html", wait_until="domcontentloaded")
         unit_res = unit_page.evaluate("""async (ver) => {
           const eng = await import(`/engine.js?v=${ver}`);
-          const { GardenStore, createMemoryStorage } = await import(`/store.js?v=${ver}`);
+          const { GardenStore, createMemoryStorage, DEMO_ESSAY_ID, CARD_STYLE_STORAGE_KEY } = await import(`/store.js?v=${ver}`);
+          const { CloudClient } = await import(`/cloud-client.js?v=${ver}`);
           const cfg = await (await fetch(`/game-config.json?v=${ver}`)).json();
           const cat = await (await fetch(`/catalog.json?v=${ver}`)).json();
 
@@ -351,8 +358,82 @@ try:
             if (isNaN(norm)) throw new Error('Box-Muller produced NaN');
           }
 
+          bgTest.setScreen('home');
+          assertEq(vAdapter.currentScreen, 'home', 'VirtualAdapter currentScreen home');
+          bgTest.setScreen('full_island');
+          assertEq(vAdapter.currentScreen, 'full_island', 'VirtualAdapter currentScreen full_island');
+
           bgTest.destroy();
           assertEq(vAdapter.intervals.size, 0, 'VirtualAdapter intervals cleared after destroy');
+
+          // (9) store.js: GardenStore 介面（示範反應增刪、成員顯示名稱、卡片樣式與重設、編輯保留隱私）
+          const sMem = createMemoryStorage();
+          const sStore = new GardenStore(cfg, cat, sMem);
+          assertEq(sStore.setEssayReaction(DEMO_ESSAY_ID, 'love'), 'love', 'demo react add');
+          assertEq(sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).reactions, { user_me: 'love' }, 'demo react persisted');
+          assertEq(sStore.setEssayReaction(DEMO_ESSAY_ID, 'love'), null, 'demo react toggle off');
+          assertEq('user_me' in sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).reactions, false, 'demo react toggle deletes key');
+          sStore.setEssayReaction(DEMO_ESSAY_ID, 'sparkle');
+          assertEq(sStore.setEssayReaction(DEMO_ESSAY_ID, null), null, 'demo react explicit null');
+          assertEq('user_me' in sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).reactions, false, 'demo react null deletes without leaving null');
+
+          const { essay: privEssay } = sStore.submitEssay('一篇超過十字用來測試隱私與紙張樣式的隨筆', true, undefined, 'card3');
+          assertEq(sStore.getPreferredCardStyle(), 'card3', 'preferred style synced on submit');
+          sStore.setEssayCardStyle(privEssay.id, 'card5');
+          assertEq(sStore.getPreferredCardStyle(), 'card5', 'setEssayCardStyle updates preferred style');
+          assertEq(sStore.getCarouselEssays().find(e => e.id === privEssay.id).cardStyle, 'card5', 'setEssayCardStyle updates essay');
+          sStore.setEssayCardStyle(DEMO_ESSAY_ID, 'card6');
+          assertEq(sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).cardStyle, 'card6', 'setEssayCardStyle updates demo essay');
+          const editedEssay = sStore.updateEssayContent(privEssay.id, '更新後仍超過十字且不可誤清私密標記', undefined);
+          assertEq(editedEssay.private, true, 'updateEssayContent(..., undefined) preserves private');
+
+          assertEq(sStore.getMemberDisplayName('user_me'), '旅人作家', 'member displayName self');
+          assertEq(sStore.getMemberDisplayName('missing_uid'), '旅人', 'member displayName fallback');
+          sStore.createGroupGarden('共筆驗證團', 'forest');
+          assertEq(sStore.getMemberDisplayName('user_friend_1'), '小沐(圈友)', 'member displayName teammate');
+
+          sStore.resetAllData();
+          assertEq(sStore.getPreferredCardStyle(), 'card1', 'resetAllData resets preferred style');
+          assertEq(sMem.getItem(CARD_STYLE_STORAGE_KEY), null, 'resetAllData clears card style key');
+          assertEq(sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).cardStyle, 'card2', 'resetAllData clears demo cardStyle');
+          assertEq(sStore.getCarouselEssays().find(e => e.id === DEMO_ESSAY_ID).reactions, {}, 'resetAllData clears demo reactions');
+
+          // (10) cloud-client.js: AbortController 逾時錯誤碼與 logout 收到 AUTH_INVALID 不觸發 onAuthInvalid
+          let seenSignal = null;
+          const ccTimeout = new CloudClient({
+            gasWebAppUrl: 'https://example.invalid/gas',
+            storage: createMemoryStorage(),
+            fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
+              seenSignal = init.signal;
+              init.signal.addEventListener('abort', () => {
+                const e = new Error('aborted');
+                e.name = 'AbortError';
+                reject(e);
+              }, { once: true });
+            })
+          });
+          let timeoutErr = null;
+          try { await ccTimeout.request('ping', {}, { timeoutMs: 15 }); } catch (err) { timeoutErr = err; }
+          assertEq(Boolean(seenSignal && seenSignal.aborted), true, 'AbortController aborted on timeoutMs');
+          assertEq(timeoutErr?.code, 'TIMEOUT_ERROR', 'CloudClient timeout throws TIMEOUT_ERROR');
+
+          let authInvalidCalls = 0;
+          const ccAuth = new CloudClient({
+            gasWebAppUrl: 'https://example.invalid/gas',
+            storage: createMemoryStorage(),
+            onAuthInvalid: () => { authInvalidCalls += 1; },
+            fetchImpl: async () => ({
+              ok: true,
+              text: async () => JSON.stringify({ ok: false, code: 'AUTH_INVALID', message: 'expired' })
+            })
+          });
+          ccAuth.setSessionToken('tok_keep');
+          let logoutErr = null;
+          try { await ccAuth.request('logout', {}); } catch (err) { logoutErr = err; }
+          assertEq(logoutErr?.code, 'AUTH_INVALID', 'logout surfaces AUTH_INVALID');
+          assertEq(authInvalidCalls, 0, 'logout AUTH_INVALID must not trigger onAuthInvalid');
+          try { await ccAuth.request('bootstrap', {}); } catch (_err) {}
+          assertEq(authInvalidCalls, 1, 'bootstrap AUTH_INVALID triggers onAuthInvalid');
 
           return 'UNIT_OK';
         }""", ASSET_VER)
@@ -361,6 +442,69 @@ try:
         unexpected_console_errs = [e for e in unit_console_errors if "[GardenStore] Stored state" not in e]
         assert not unexpected_console_errs, f"Unexpected unit console errors: {unexpected_console_errs}"
         unit_page.close()
+
+        # 無 DOM 環境匯入 app.js 不觸發 boot()，並驗證島嶼幾何計算／零寬高防守／-0 正規化
+        node_exe, _ = compute_driver_executable()
+        node_app_proc = subprocess.run(
+            [node_exe, "--input-type=module", "-"],
+            input="""
+import assert from 'node:assert/strict';
+assert.equal(typeof document, 'undefined', 'expected no-DOM environment');
+const { computeSvgViewportScale, computeIslandViewBox, clampIslandPanMetrics } = await import('./app.js');
+
+assert.equal(computeSvgViewportScale(null, { width: 430, height: 450 }), 0);
+assert.equal(computeSvgViewportScale({ width: 0, height: 400 }, { width: 430, height: 450 }), 0);
+assert.equal(computeSvgViewportScale({ width: 400, height: -5 }, { width: 430, height: 450 }), 0);
+assert.equal(computeSvgViewportScale({ width: 400, height: 400 }, { width: 430, height: 0 }), 0);
+assert.equal(computeSvgViewportScale({ width: 215, height: 450 }, { width: 430, height: 450 }), 0.5);
+
+assert.equal(computeIslandViewBox('home', 5, null), null);
+assert.equal(computeIslandViewBox('home', 5, { svgRect: { top: 0, width: 0, height: 300 }, zoneTop: 0, zoneBottom: 300 }), null);
+assert.equal(computeIslandViewBox('full', 5, { svgRect: { top: 0, width: 400, height: 0 }, winH: 844 }), null);
+assert.throws(() => computeIslandViewBox('bad', 5, { svgRect: { top: 0, width: 400, height: 400 } }));
+
+let prevHomeY = Infinity;
+for (const sz of [5, 6, 7, 8, 9]) {
+  const hv = computeIslandViewBox('home', sz, { svgRect: { top: 40, width: 380, height: 420 }, zoneTop: 60, zoneBottom: 380 });
+  assert.equal(hv.x, -215);
+  assert.equal(hv.width, 430);
+  assert.equal(hv.height, 450);
+  assert.ok(hv.scale > 0 && Number.isFinite(hv.y) && hv.y < prevHomeY, `home viewBox monotonic at ${sz}`);
+  prevHomeY = hv.y;
+
+  const fv = computeIslandViewBox('full', sz, { svgRect: { top: 0, width: 412, height: 780 }, winH: 844, navTop: 779 });
+  assert.equal(fv.x, -300);
+  assert.equal(fv.width, 600);
+  assert.equal(fv.height, 580);
+  assert.ok(fv.scale > 0 && Number.isFinite(fv.y), `full viewBox finite at ${sz}`);
+
+  const zeroPan = clampIslandPanMetrics({
+    containerRect: { width: 412, height: 700 }, svgRect: { width: 412, height: 700 },
+    viewBox: fv, panX: -0, panY: -0, zoom: 1, regionSize: sz
+  });
+  assert.equal(Object.is(zeroPan.x, 0), true, `normalize -0 panX at ${sz}`);
+  assert.equal(Object.is(zeroPan.y, 0), true, `normalize -0 panY at ${sz}`);
+
+  const clamped = clampIslandPanMetrics({
+    containerRect: { width: 412, height: 700 }, svgRect: { width: 412, height: 700 },
+    viewBox: fv, panX: -9999, panY: 9999, zoom: 2.5, regionSize: sz
+  });
+  assert.ok(Math.abs(clamped.x) < 9999 && Math.abs(clamped.y) < 9999, `clamped pan at ${sz}`);
+}
+
+const zeroDef = clampIslandPanMetrics({
+  containerRect: { width: 0, height: 700 }, svgRect: { width: 412, height: 700 },
+  viewBox: { x: -300, y: -290, width: 600, height: 580 }, panX: 12, panY: -8
+});
+assert.deepEqual(zeroDef, { x: 12, y: -8 });
+""",
+            text=True,
+            encoding="utf-8",
+            cwd=ROOT_DIR,
+            capture_output=True,
+            check=False,
+        )
+        assert node_app_proc.returncode == 0, f"Node app.js check failed:\n{node_app_proc.stderr}\n{node_app_proc.stdout}"
         print("[2/4] REAL_JS_ENGINE_AND_STORE_UNIT_TESTS_PASSED")
 
         # --------------------------------------------------------------------
@@ -504,6 +648,55 @@ try:
         e2e_page.click("#btn-back-home")
         tf_home = e2e_page.locator("#home-island-svg .island-pan-layer").get_attribute("transform")
         assert tf_home == "translate(0.0, 0.0) scale(1.000)", f"Expected home reset, got {tf_home}"
+
+        # 驗證首頁隨筆卡（right）與閱讀彈窗（left）長按反應托盤對齊且不重疊錯位
+        def assert_long_press_tray(btn_selector, expected_align):
+            btn = e2e_page.locator(btn_selector).first
+            assert btn.get_attribute("data-tray-align") == expected_align, f"Expected data-tray-align={expected_align} on {btn_selector}"
+            box = btn.bounding_box()
+            assert box, f"Expected bounding box for {btn_selector}"
+            e2e_page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+            e2e_page.mouse.down()
+            e2e_page.wait_for_selector("#reaction-tray:not(.hidden)", timeout=2000)
+            e2e_page.wait_for_timeout(200)
+            geom = e2e_page.evaluate("""(sel) => {
+              const tray = document.getElementById('reaction-tray');
+              const btn = document.querySelector(sel);
+              const iconRect = (btn.querySelector('svg') || btn).getBoundingClientRect();
+              const tr = tray.getBoundingClientRect();
+              const opts = [...tray.querySelectorAll('[data-reaction-opt]')].map(o => {
+                const r = o.getBoundingClientRect();
+                return { id: o.dataset.reactionOpt, left: r.left, right: r.right, cx: r.left + r.width / 2 };
+              });
+              return {
+                align: tray.dataset.trayAlign,
+                tray: { left: tr.left, right: tr.right, bottom: tr.bottom },
+                btnTop: btn.getBoundingClientRect().top,
+                iconCx: iconRect.left + iconRect.width / 2,
+                opts,
+                winW: window.innerWidth
+              };
+            }""", btn_selector)
+            e2e_page.mouse.up()
+            opts = geom["opts"]
+            assert geom["align"] == expected_align and len(opts) == 5, f"Unexpected tray geom: {geom}"
+            assert (opts[-1]["id"] if expected_align == "right" else opts[0]["id"]) == "love", f"Unexpected love order: {opts}"
+            for a, b in zip(opts, opts[1:]):
+                assert a["right"] <= b["left"] + 1, f"Reaction tray options overlapped: {a} vs {b}"
+            assert geom["tray"]["left"] >= 8 and geom["tray"]["right"] <= geom["winW"] - 8, f"Tray outside viewport: {geom['tray']}"
+            assert geom["tray"]["bottom"] <= geom["btnTop"], f"Tray overlapped trigger button: {geom}"
+            love_opt = opts[-1] if expected_align == "right" else opts[0]
+            if geom["tray"]["left"] > 8.5 and geom["tray"]["right"] < geom["winW"] - 8.5:
+                assert abs(love_opt["cx"] - geom["iconCx"]) <= 4, f"Love icon misaligned: {love_opt['cx']} vs {geom['iconCx']}"
+
+        assert_long_press_tray('#essay-carousel [data-react-btn="essay_demo_welcome"]', "right")
+        card_box = e2e_page.locator('#essay-carousel .essay-card[data-essay-id="essay_demo_welcome"] .essay-text-wrap').first.bounding_box()
+        assert card_box, "Expected demo essay card bounding box"
+        e2e_page.mouse.click(card_box["x"] + card_box["width"] / 2, card_box["y"] + card_box["height"] / 2)
+        e2e_page.wait_for_selector('#modal-box [data-react-btn="essay_demo_welcome"]', state="visible", timeout=2000)
+        assert_long_press_tray('#modal-box [data-react-btn="essay_demo_welcome"]', "left")
+        e2e_page.keyboard.press("Escape")
+        assert not e2e_page.locator("#modal-overlay").is_visible()
 
         e2e_page.click("#btn-enter-fullscreen-garden")
 

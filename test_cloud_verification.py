@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from gspread.utils import rowcol_to_a1
 
 sys.path.insert(0, r"C:\Users\wl020\.gemini\config\mcp_servers")
-from gsheet_io import _client, read, write  # noqa: E402
+from gsheet_io import _client, write  # noqa: E402
 
 DEFAULT_SHEET_ID = "1UBt7fuHru0fJv1QLStpvaIr2YxIg2vO9sM8yrd-cTAE"
 
@@ -274,123 +274,14 @@ def verify_m1(sheet_id: str) -> None:
     print("M1_L1_SCHEMA_AND_FORMAT_VERIFICATION_PASSED")
 
 
-L2_NODE_SCRIPT = r"""
-import assert from 'node:assert/strict';
-import crypto from 'node:crypto';
-import fs from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
-
-const require = createRequire(import.meta.url);
-const rootDir = process.cwd();
-const eng = await import('./engine.js');
-const gas = require('./gas/Code.gs');
-const fileCfg = JSON.parse(fs.readFileSync(path.join(rootDir, 'game-config.json'), 'utf8'));
-const fileCat = JSON.parse(fs.readFileSync(path.join(rootDir, 'catalog.json'), 'utf8'));
-
-const eq = (a, b, msg) => assert.deepStrictEqual(a, b, msg);
-const near = (a, b, eps, msg) => {
-  assert.ok(Math.abs(a - b) < eps, `${msg}: ${a} vs ${b}`);
-};
-
-// ----------------------------------------------------------------------------
-// 1. TC-S05：靜態設定與 engine.js <-> gas/Code.gs 14 項規則函式對拍
-// ----------------------------------------------------------------------------
-for (const k of Object.keys(gas.GAME_CONFIG)) {
-  eq(gas.GAME_CONFIG[k], fileCfg[k], `GAME_CONFIG.${k} mismatch`);
-}
-eq(Object.keys(gas.CATALOG.themes), Object.keys(fileCat.themes), 'themes keys mismatch');
-eq(gas.CATALOG.species, fileCat.species, 'species mismatch');
-eq(gas.CATALOG.decor, fileCat.decor, 'decor mismatch');
-eq(gas.HEADERS.users.length, 21, 'users must have 21 cols');
-eq(gas.HEADERS.groups.length, 13, 'groups must have 13 cols');
-eq(gas.HEADERS.gardens.length, 12, 'gardens must have 12 cols');
-
-// 14 shared pure functions
-for (const ts of [Date.UTC(2026, 10, 19, 19, 59), Date.UTC(2026, 10, 19, 20, 0), Date.UTC(2026, 10, 30, 10, 0)]) {
-  for (const tz of ['Asia/Taipei', 'America/Los_Angeles', 'UTC']) {
-    eq(gas.getGameDayKey(ts, tz, 4), eng.getGameDayKey(ts, tz, 4), `getGameDayKey(${ts},${tz})`);
-  }
-}
-for (const dk of ['2026-11-30', '2026-02-28', '2024-02-29', '2026-12-31']) {
-  eq(gas.addDays(dk, 1), eng.addDays(dk, 1), `addDays(${dk},1)`);
-  eq(gas.addDays(dk, -2), eng.addDays(dk, -2), `addDays(${dk},-2)`);
-  eq(gas.isLastDayOfMonth(dk), eng.isLastDayOfMonth(dk), `isLastDayOfMonth(${dk})`);
-}
-for (const txt of ['', '十個字測試這是一篇中文', 'Hello world 2026! 你好嗎？', "don't stop 123 中文"]) {
-  eq(gas.countEssayWords(txt), eng.countEssayWords(txt), `countEssayWords(${txt})`);
-}
-for (const w of [0, 9, 10, 20, 60, 110, 200]) {
-  eq(gas.getRarityProbabilities(w, fileCfg), eng.getRarityProbabilities(w, fileCfg), `probs(${w})`);
-  for (const pity of [0, 9, 10]) {
-    for (const rVal of [0.01, 0.45, 0.88, 0.99]) {
-      eq(
-        gas.rollSeed(w, pity, 'forest', fileCat.species, fileCfg, () => rVal),
-        eng.rollSeed(w, pity, 'forest', fileCat.species, fileCfg, () => rVal),
-        `rollSeed(${w},${pity},${rVal})`
-      );
-    }
-  }
-}
-for (const sc of [0, 1, 6, 7, 29, 30, 100]) {
-  eq(gas.getStreakMultiplier(sc, fileCfg), eng.getStreakMultiplier(sc, fileCfg), `mult(${sc})`);
-}
-for (const st of [
-  { count: 1, lastDay: '2026-11-19', prevCount: 0, prevLastDay: null },
-  { count: 5, lastDay: '2026-11-18', prevCount: 4, prevLastDay: '2026-11-17' },
-  { count: 3, lastDay: '2026-11-20', prevCount: 2, prevLastDay: '2026-11-19' }
-]) {
-  eq(gas.advanceStreakOnWrite(st, '2026-11-20'), eng.advanceStreakOnWrite(st, '2026-11-20'), 'advanceStreakOnWrite');
-  eq(gas.repairStreakOnMakeUp(st, '2026-11-20'), eng.repairStreakOnMakeUp(st, '2026-11-20'), 'repairStreakOnMakeUp');
-}
-for (let m = 1; m <= 5; m++) {
-  for (let b = 1; b <= 5; b++) {
-    eq(gas.calcRequiredDays(b, m, fileCfg), eng.calcRequiredDays(b, m, fileCfg), `reqDays(${b},${m})`);
-  }
-}
-for (let req = 1; req <= 5; req++) {
-  for (let p = 0; p <= req + 1; p++) {
-    eq(gas.calcPlantLevel(p, req), eng.calcPlantLevel(p, req), `plantLv(${p},${req})`);
-  }
-}
-const evalCases = [
-  [{ plantedDay: '2026-11-20', requiredDays: 2 }, {}, '2026-11-20', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-02', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-04', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-05', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 }, '2026-11-04': { madeUp: true } }, '2026-11-05', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 }, '2026-11-05': { madeUp: true } }, '2026-11-06', 'personal'],
-  [{ plantedDay: '2026-11-01', requiredDays: 3 }, { '2026-11-02': { writers: { u1: 1, u2: 2 } }, '2026-11-03': { writers: { u1: 3 } } }, '2026-11-03', 'group'],
-  [{ finalStage: 'dead', finalLevel: 3 }, {}, '2026-11-10', 'personal'],
-  [{ finalStage: 'grown', hadWilt: true, requiredDays: 3 }, {}, '2026-11-10', 'personal'],
-  [{ limited: true, requiredDays: 1 }, {}, '2026-11-10', 'personal'],
-  [{ frozen: { stage: 'growing', progress: 2, level: 3, hadWilt: false, isPerfect: false } }, {}, '2026-11-10', 'personal']
-];
-for (const [pl, dMap, tk, gt] of evalCases) {
-  eq(gas.evaluatePlantState(pl, dMap, tk, gt), eng.evaluatePlantState(pl, dMap, tk, gt), `evalPlant(${tk})`);
-}
-const bPlants = [
-  { speciesId: 'fb_l1', evalState: { stage: 'grown' } },
-  { speciesId: 'fo_c1', evalState: { stage: 'dead' } },
-  { speciesId: 'lim_7', limited: true, evalState: { stage: 'grown' } }
-];
-const bDecor = [{ itemId: 'dec_lantern' }, { itemId: 'dec_arch' }];
-eq(gas.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), eng.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), 'beauty');
-for (const vm of [{ u1: 'forest', u2: 'oasis' }, { u1: 'oasis', u2: 'oasis', u3: 'flowerbed' }, {}]) {
-  eq(gas.resolveGroupThemeVote('grp_1', '2026-12', vm), eng.resolveGroupThemeVote('grp_1', '2026-12', vm), 'vote');
-}
-console.log('[TC-S05] PASSED');
-
-// ----------------------------------------------------------------------------
-// 2. 記憶體版 Google Sheets / LockService / DriveApp 模擬器
-// ----------------------------------------------------------------------------
+MOCK_GAS_ENV_JS = r"""
 function letterToCol(letters) {
   let c = 0;
   for (const ch of letters) c = c * 26 + (ch.charCodeAt(0) - 64);
   return c;
 }
 
-function makeMockEnv() {
+function makeMockGasEnv({ withContentService = false } = {}) {
   let now = Date.UTC(2026, 10, 20, 6, 0, 0); // 2026-11-20 14:00 TPE
   let rngTick = 0;
   let uuidTick = 0;
@@ -485,8 +376,7 @@ function makeMockEnv() {
         return { getSheetByName: (t) => (sheets[t] ? makeSheetProxy(t) : null) };
       },
       flush: () => {
-        for (const k of Object.keys(sheets)) {
-          const sh = sheets[k];
+        for (const sh of Object.values(sheets)) {
           sh.committedMaxRows = sh.maxRows;
           sh.committedMaxCols = sh.maxCols;
           sh.committedColFormats = sh.colFormats.slice();
@@ -557,6 +447,14 @@ function makeMockEnv() {
         }
       })
     },
+    ContentService: withContentService ? {
+      MimeType: { JSON: 'application/json' },
+      createTextOutput: (txt) => ({
+        _txt: txt,
+        setMimeType() { return this; },
+        getContent() { return this._txt; }
+      })
+    } : null,
     sheets,
     backups,
     setLockFail: (v) => { lockShouldFail = v; },
@@ -565,8 +463,119 @@ function makeMockEnv() {
   gas.__setGasEnv(env);
   return env;
 }
+""".strip()
 
-const mock = makeMockEnv();
+
+L2_NODE_SCRIPT = r"""
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+
+const require = createRequire(import.meta.url);
+const rootDir = process.cwd();
+const eng = await import('./engine.js');
+const gas = require('./gas/Code.gs');
+const fileCfg = JSON.parse(fs.readFileSync(path.join(rootDir, 'game-config.json'), 'utf8'));
+const fileCat = JSON.parse(fs.readFileSync(path.join(rootDir, 'catalog.json'), 'utf8'));
+
+const eq = (a, b, msg) => assert.deepStrictEqual(a, b, msg);
+
+// ----------------------------------------------------------------------------
+// 1. TC-S05：靜態設定與 engine.js <-> gas/Code.gs 14 項規則函式對拍
+// ----------------------------------------------------------------------------
+for (const k of Object.keys(gas.GAME_CONFIG)) {
+  eq(gas.GAME_CONFIG[k], fileCfg[k], `GAME_CONFIG.${k} mismatch`);
+}
+eq(Object.keys(gas.CATALOG.themes), Object.keys(fileCat.themes), 'themes keys mismatch');
+eq(gas.CATALOG.species, fileCat.species, 'species mismatch');
+eq(gas.CATALOG.decor, fileCat.decor, 'decor mismatch');
+eq(gas.HEADERS.users.length, 21, 'users must have 21 cols');
+eq(gas.HEADERS.groups.length, 13, 'groups must have 13 cols');
+eq(gas.HEADERS.gardens.length, 12, 'gardens must have 12 cols');
+
+// 14 shared pure functions
+for (const ts of [Date.UTC(2026, 10, 19, 19, 59), Date.UTC(2026, 10, 19, 20, 0), Date.UTC(2026, 10, 30, 10, 0)]) {
+  for (const tz of ['Asia/Taipei', 'America/Los_Angeles', 'UTC']) {
+    eq(gas.getGameDayKey(ts, tz, 4), eng.getGameDayKey(ts, tz, 4), `getGameDayKey(${ts},${tz})`);
+  }
+}
+for (const dk of ['2026-11-30', '2026-02-28', '2024-02-29', '2026-12-31']) {
+  eq(gas.addDays(dk, 1), eng.addDays(dk, 1), `addDays(${dk},1)`);
+  eq(gas.addDays(dk, -2), eng.addDays(dk, -2), `addDays(${dk},-2)`);
+  eq(gas.isLastDayOfMonth(dk), eng.isLastDayOfMonth(dk), `isLastDayOfMonth(${dk})`);
+}
+for (const txt of ['', '十個字測試這是一篇中文', 'Hello world 2026! 你好嗎？', "don't stop 123 中文"]) {
+  eq(gas.countEssayWords(txt), eng.countEssayWords(txt), `countEssayWords(${txt})`);
+}
+for (const w of [0, 9, 10, 20, 60, 110, 200]) {
+  eq(gas.getRarityProbabilities(w, fileCfg), eng.getRarityProbabilities(w, fileCfg), `probs(${w})`);
+  for (const pity of [0, 9, 10]) {
+    for (const rVal of [0.01, 0.45, 0.88, 0.99]) {
+      eq(
+        gas.rollSeed(w, pity, 'forest', fileCat.species, fileCfg, () => rVal),
+        eng.rollSeed(w, pity, 'forest', fileCat.species, fileCfg, () => rVal),
+        `rollSeed(${w},${pity},${rVal})`
+      );
+    }
+  }
+}
+for (const sc of [0, 1, 6, 7, 29, 30, 100]) {
+  eq(gas.getStreakMultiplier(sc, fileCfg), eng.getStreakMultiplier(sc, fileCfg), `mult(${sc})`);
+}
+for (const st of [
+  { count: 1, lastDay: '2026-11-19', prevCount: 0, prevLastDay: null },
+  { count: 5, lastDay: '2026-11-18', prevCount: 4, prevLastDay: '2026-11-17' },
+  { count: 3, lastDay: '2026-11-20', prevCount: 2, prevLastDay: '2026-11-19' }
+]) {
+  eq(gas.advanceStreakOnWrite(st, '2026-11-20'), eng.advanceStreakOnWrite(st, '2026-11-20'), 'advanceStreakOnWrite');
+  eq(gas.repairStreakOnMakeUp(st, '2026-11-20'), eng.repairStreakOnMakeUp(st, '2026-11-20'), 'repairStreakOnMakeUp');
+}
+for (let m = 1; m <= 5; m++) {
+  for (let b = 1; b <= 5; b++) {
+    eq(gas.calcRequiredDays(b, m, fileCfg), eng.calcRequiredDays(b, m, fileCfg), `reqDays(${b},${m})`);
+  }
+}
+for (let req = 1; req <= 5; req++) {
+  for (let p = 0; p <= req + 1; p++) {
+    eq(gas.calcPlantLevel(p, req), eng.calcPlantLevel(p, req), `plantLv(${p},${req})`);
+  }
+}
+const evalCases = [
+  [{ plantedDay: '2026-11-20', requiredDays: 2 }, {}, '2026-11-20', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-02', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-04', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 } }, '2026-11-05', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 }, '2026-11-04': { madeUp: true } }, '2026-11-05', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 2 }, { '2026-11-02': { essays: 1 }, '2026-11-05': { madeUp: true } }, '2026-11-06', 'personal'],
+  [{ plantedDay: '2026-11-01', requiredDays: 3 }, { '2026-11-02': { writers: { u1: 1, u2: 2 } }, '2026-11-03': { writers: { u1: 3 } } }, '2026-11-03', 'group'],
+  [{ finalStage: 'dead', finalLevel: 3 }, {}, '2026-11-10', 'personal'],
+  [{ finalStage: 'grown', hadWilt: true, requiredDays: 3 }, {}, '2026-11-10', 'personal'],
+  [{ limited: true, requiredDays: 1 }, {}, '2026-11-10', 'personal'],
+  [{ frozen: { stage: 'growing', progress: 2, level: 3, hadWilt: false, isPerfect: false } }, {}, '2026-11-10', 'personal']
+];
+for (const [pl, dMap, tk, gt] of evalCases) {
+  eq(gas.evaluatePlantState(pl, dMap, tk, gt), eng.evaluatePlantState(pl, dMap, tk, gt), `evalPlant(${tk})`);
+}
+const bPlants = [
+  { speciesId: 'fb_l1', evalState: { stage: 'grown' } },
+  { speciesId: 'fo_c1', evalState: { stage: 'dead' } },
+  { speciesId: 'lim_7', limited: true, evalState: { stage: 'grown' } }
+];
+const bDecor = [{ itemId: 'dec_lantern' }, { itemId: 'dec_arch' }];
+eq(gas.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), eng.calculateBeauty(bPlants, bDecor, fileCat, fileCfg), 'beauty');
+for (const vm of [{ u1: 'forest', u2: 'oasis' }, { u1: 'oasis', u2: 'oasis', u3: 'flowerbed' }, {}]) {
+  eq(gas.resolveGroupThemeVote('grp_1', '2026-12', vm), eng.resolveGroupThemeVote('grp_1', '2026-12', vm), 'vote');
+}
+console.log('[TC-S05] PASSED');
+
+// ----------------------------------------------------------------------------
+// 2. 記憶體版 Google Sheets / LockService / DriveApp 模擬器
+// ----------------------------------------------------------------------------
+__MOCK_GAS_ENV__
+
+const mock = makeMockGasEnv();
 const callPost = (action, authToken, payload = {}) =>
   JSON.parse(gas.doPost({ postData: { contents: JSON.stringify({ action, authToken, payload }) } }));
 const ok = (action, authToken, payload = {}) => {
@@ -892,7 +901,7 @@ eq(mock.backups[2].name, 'backup_2027-01-03', 'today backup created');
 assert.equal(mock.isLocked(), false, 'script lock released');
 
 console.log('M2_L2_ENGINE_PARITY_AND_22_ACTIONS_SIMULATION_PASSED');
-"""
+""".replace("__MOCK_GAS_ENV__", MOCK_GAS_ENV_JS)
 
 
 def _run_node_module_script(script_text: str, label: str) -> None:
@@ -944,135 +953,10 @@ const { CloudGardenStore, CLOUD_STATE_STORAGE_KEY, CARD_STYLE_STORAGE_KEY } = aw
 const eq = (a, b, msg) => assert.deepStrictEqual(a, b, msg);
 
 // 建立連接真實 gas/Code.gs 的記憶體版 Google Sheets 環境與模擬 fetch
-function letterToCol(letters) {
-  let c = 0;
-  for (const ch of letters) c = c * 26 + (ch.charCodeAt(0) - 64);
-  return c;
-}
+__MOCK_GAS_ENV__
 
 function makeGasMockBackend() {
-  let now = Date.UTC(2026, 10, 20, 6, 0, 0); // 2026-11-20 14:00 TPE
-  let rngTick = 0;
-  let uuidTick = 0;
-  let locked = false;
-
-  const makeTabState = (initRows, maxRows, maxCols) => ({
-    rows: initRows,
-    maxRows,
-    maxCols,
-    committedMaxRows: maxRows,
-    committedMaxCols: maxCols,
-    colFormats: Array(maxCols).fill('@'),
-    committedColFormats: Array(maxCols).fill('@')
-  });
-
-  const sheets = {
-    users: makeTabState([gas.HEADERS.users.slice()], 100, 21),
-    groups: makeTabState([gas.HEADERS.groups.slice()], 100, 20),
-    gardens: makeTabState([gas.HEADERS.gardens.slice()], 100, 20),
-    essays: makeTabState([['day_key']], 100, 20)
-  };
-
-  const ensureRowLen = (sh, r1) => {
-    while (sh.rows.length < r1) sh.rows.push([]);
-  };
-
-  const parseA1 = (fullRange) => {
-    const [tab, ref] = fullRange.split('!');
-    const sh = sheets[tab];
-    if (ref === '1:1') return { tab, sh, r1: 1, r2: 1, c1: 1, c2: Math.max(1, (sh.rows[0] || []).length) };
-    const m = ref.match(/^([A-Z]+)(\d+)?(?::([A-Z]+)(\d+)?)?$/);
-    const c1 = letterToCol(m[1]);
-    const r1 = m[2] ? Number(m[2]) : 1;
-    const c2 = m[3] ? letterToCol(m[3]) : c1;
-    const r2 = m[4] ? Number(m[4]) : (ref.includes(':') ? sh.maxRows : r1);
-    return { tab, sh, r1, r2, c1, c2 };
-  };
-
-  const makeSheetProxy = (tab) => {
-    const sh = sheets[tab];
-    return {
-      getMaxRows: () => sh.maxRows,
-      getMaxColumns: () => sh.maxCols,
-      insertRowsAfter: (_after, count) => { sh.maxRows += count; },
-      insertColumnsAfter: (_after, count) => {
-        sh.maxCols += count;
-        for (let i = 0; i < count; i++) sh.colFormats.push('DEFAULT');
-      },
-      getRange: (_r, c, _nr, nc) => ({
-        setNumberFormat: (fmt) => {
-          for (let ci = c - 1; ci < c - 1 + nc; ci++) sh.colFormats[ci] = fmt;
-        }
-      })
-    };
-  };
-
-  gas.__setGasEnv({
-    spreadsheetId: gas.SPREADSHEET_ID,
-    nowMs: () => now,
-    rng: () => { rngTick = (rngTick + 1) % 100; return (rngTick * 0.37) % 1; },
-    getUuid: () => { uuidTick += 1; return `00000000-0000-4000-8000-${String(uuidTick).padStart(12, '0')}`; },
-    sha256Bytes: (input) => Array.from(crypto.createHash('sha256').update(String(input), 'utf8').digest()),
-    LockService: {
-      getScriptLock: () => ({
-        tryLock: () => { if (locked) return false; locked = true; return true; },
-        releaseLock: () => { locked = false; }
-      })
-    },
-    SpreadsheetApp: {
-      openById: () => ({ getSheetByName: (t) => (sheets[t] ? makeSheetProxy(t) : null) }),
-      flush: () => {
-        for (const sh of Object.values(sheets)) {
-          sh.committedMaxRows = sh.maxRows;
-          sh.committedMaxCols = sh.maxCols;
-          sh.committedColFormats = sh.colFormats.slice();
-        }
-      }
-    },
-    Sheets: {
-      Spreadsheets: {
-        Values: {
-          batchGet: (_id, opts) => ({
-            valueRanges: opts.ranges.map((rngStr) => {
-              const { sh, r1, r2, c1, c2 } = parseA1(rngStr);
-              const maxR = Math.min(r2, sh.rows.length);
-              const out = [];
-              for (let r = r1 - 1; r < maxR; r++) {
-                const row = sh.rows[r] || [];
-                const slice = [];
-                for (let c = c1 - 1; c < c2; c++) slice.push(row[c] !== undefined ? row[c] : '');
-                while (slice.length && slice[slice.length - 1] === '') slice.pop();
-                out.push(slice);
-              }
-              while (out.length && out[out.length - 1].length === 0) out.pop();
-              return { range: rngStr, values: out };
-            })
-          }),
-          batchUpdate: (body) => {
-            for (const item of body.data) {
-              const { sh, r1, c1 } = parseA1(item.range);
-              for (let ri = 0; ri < item.values.length; ri++) {
-                ensureRowLen(sh, r1 + ri);
-                const row = sh.rows[r1 + ri - 1];
-                for (let ci = 0; ci < item.values[ri].length; ci++) {
-                  row[c1 + ci - 1] = item.values[ri][ci];
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    ContentService: {
-      MimeType: { JSON: 'application/json' },
-      createTextOutput: (txt) => ({
-        _txt: txt,
-        setMimeType() { return this; },
-        getContent() { return this._txt; }
-      })
-    }
-  });
-
+  const env = makeMockGasEnv({ withContentService: true });
   const calls = [];
   let interceptNext = null;
 
@@ -1097,10 +981,10 @@ function makeGasMockBackend() {
   };
 
   return {
-    sheets,
+    sheets: env.sheets,
     calls,
     fetchImpl,
-    setNowMs: (ms) => { now = ms; },
+    setNowMs: env.setNowMs,
     setInterceptNext: (fn) => { interceptNext = fn; }
   };
 }
@@ -1141,11 +1025,9 @@ eq(authInvalidCount, 1, 'onAuthInvalid triggered once');
 // ----------------------------------------------------------------------------
 // 2. CloudGardenStore 完整契約、Stale-While-Revalidate 快取與樂觀更新回滾驗證
 // ----------------------------------------------------------------------------
-let stateChangeCount = 0;
 const storeA = new CloudGardenStore(fileCfg, fileCat, {
   client: clientA,
-  storage: storageA,
-  onStateChange: () => { stateChangeCount += 1; }
+  storage: storageA
 });
 
 // 未登入前所有同步唯讀方法必須安全可呼叫
@@ -1302,7 +1184,7 @@ eq(storageA.getItem(SESSION_STORAGE_KEY), null, 'session storage cleared');
 eq(storageA.getItem(CLOUD_STATE_STORAGE_KEY), null, 'state cache cleared');
 
 console.log('P3B_CLOUD_CLIENT_AND_CLOUD_STORE_CONTRACTS_PASSED');
-"""
+""".replace("__MOCK_GAS_ENV__", MOCK_GAS_ENV_JS)
 
 
 def verify_l3b() -> None:
@@ -1354,12 +1236,6 @@ class LiveM2Helper:
             "authToken": auth_token,
             "payload": payload or {},
         }, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(
-            self.gas_url,
-            data=body,
-            headers={"Content-Type": "text/plain;charset=utf-8"},
-            method="POST",
-        )
         t0 = time.perf_counter()
         parsed = {}
         elapsed = 0.0
@@ -2620,7 +2496,7 @@ def verify_m3(sheet_id: str, gas_url: str) -> None:
             page1.wait_for_selector("#toast-bar:not(.hidden)", timeout=5000)
             assert "網路" in page1.locator("#toast-bar").inner_text()
             page1.click("#modal-close")
-            cached_raw = page1.evaluate("() => localStorage.getItem('essay_garden_state_v4')")
+            cached_raw = page1.evaluate("() => localStorage.getItem('essay_garden_cloud_cache_v1')")
             assert cached_raw and "同團雙帳號公開隨筆" in cached_raw
             ctx1.set_offline(False)
             print("[TC-E08] PASSED")

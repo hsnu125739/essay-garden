@@ -308,3 +308,150 @@ export function resolveGroupThemeVote(gardenId, monthKey, votesMap = {}, allThem
   const idx = (h >>> 0) % candidates.length;
   return candidates[idx];
 }
+
+// 10. 惰性結算單一區域（含唯讀快照凍結植物保留與美觀度計算，純查詢不改寫原始區域）
+export function evaluateRegionState(region, daysMap, todayKey, gardenType = 'personal', catalog, config) {
+  if (!region) return null;
+  const safeDays = daysMap || {};
+  const isSnapshot = region.status === 'snapshot';
+
+  const plantsWithState = Object.values(region.plants || {}).map(p => {
+    const evalState = isSnapshot && p.frozen
+      ? { ...p.frozen, miss: 0, finalStage: null }
+      : evaluatePlantState(p, safeDays, todayKey, gardenType);
+    return { ...p, evalState };
+  });
+
+  const decorList = Object.values(region.decor || {});
+  const beauty = calculateBeauty(plantsWithState, decorList, catalog, config);
+
+  return { region, plantsWithState, decorList, beauty, todayKey };
+}
+
+// 11. 檢查昨天是否可補寫（個人昨天 essays === 0 且尚未 madeUp）
+export function canMakeUpYesterday(user, todayKey, config) {
+  const yesterdayKey = addDays(todayKey, -1);
+  const cost = config.makeUpCost;
+  if (!user) {
+    return { available: false, canAfford: false, yesterdayKey, cost };
+  }
+  const yRec = (user.days || {})[yesterdayKey];
+  const notWritten = !yRec || (yRec.essays || 0) === 0;
+  const notMadeUp = !yRec || !yRec.madeUp;
+  return {
+    available: notWritten && notMadeUp,
+    canAfford: (user.energy || 0) >= cost,
+    yesterdayKey,
+    cost
+  };
+}
+
+// 12. 檢查連續天數是否剛好在昨天中斷（昨天未寫且前天仍有連勝紀錄）
+export function hasStreakBrokenYesterday(streak, todayKey) {
+  if (!streak) return false;
+  const dayBefore = addDays(todayKey, -2);
+  if (streak.lastDay === todayKey) {
+    return streak.prevLastDay === dayBefore && (streak.prevCount || 0) > 0;
+  }
+  return streak.lastDay === dayBefore && (streak.count || 0) > 0;
+}
+
+// 13. 模擬將昨天標記為已補寫後，判斷單株植物是否可脫離死亡狀態
+export function canRescuePlantByMakeUp(plant, baseDays, todayKey, gardenType = 'personal') {
+  if (!plant) return false;
+  const safeDays = baseDays || {};
+  const yesterdayKey = addDays(todayKey, -1);
+  const simulatedDays = {
+    ...safeDays,
+    [yesterdayKey]: { ...(safeDays[yesterdayKey] || {}), madeUp: true }
+  };
+  return evaluatePlantState(plant, simulatedDays, todayKey, gardenType).stage !== 'dead';
+}
+
+// 14. 嚴格檢查格子 (x, y) 是否已被植物或裝飾占用（相容 region 與 garden.items 結構）
+export function isCellOccupied(itemsOrRegion, x, y, ignoreItemId = null) {
+  if (!itemsOrRegion) return false;
+  const src = itemsOrRegion.items || itemsOrRegion;
+  const nx = Number(x);
+  const ny = Number(y);
+  const matches = item => item && item.id !== ignoreItemId && Number(item.x) === nx && Number(item.y) === ny;
+  return Object.values(src.plants || {}).some(matches) || Object.values(src.decor || {}).some(matches);
+}
+
+// 15. 計算頂部優先提示條（順序：團體換月投票 -> 枯萎搶救 -> 昨天斷簽／剛死植物補寫）
+export function computePriorityBanner({ garden, user, evalActive, todayKey, config } = {}) {
+  if (!garden || !user || !evalActive) return null;
+
+  // 1. 團體最後一天投票提醒
+  if (garden.type === 'group' && garden.themeVote && !(garden.themeVote.votes || {})[user.uid]) {
+    return {
+      type: 'vote',
+      text: `明天換月！點此投票選擇 ${garden.themeVote.month} 的團體主題區域`,
+      action: 'open_group'
+    };
+  }
+
+  // 2. 枯萎中植物搶救提醒（day_1 沒寫 -> day_2 枯萎；當天寫隨筆可恢復原等級，否則 day_3 死亡）
+  const witheringCount = (evalActive.plantsWithState || []).filter(p => p.evalState?.stage === 'withering').length;
+  if (witheringCount > 0) {
+    return {
+      type: 'wither_urgent',
+      text: `有 ${witheringCount} 株植物正在枯萎中！今天寫隨筆即可恢復原等級，否則明天將死亡`,
+      action: 'write'
+    };
+  }
+
+  // 3. 昨天沒寫可補寫提醒（含連勝中斷或剛跨入第 2 缺日枯死的可救活植物）
+  const makeUpInfo = canMakeUpYesterday(user, todayKey, config);
+  if (makeUpInfo.available) {
+    const baseDays = garden.type === 'personal' ? user.days : garden.days;
+    const rescuableDead = (evalActive.plantsWithState || []).filter(
+      p => p.evalState?.stage === 'dead' && canRescuePlantByMakeUp(p, baseDays, todayKey, garden.type)
+    ).length;
+    if (hasStreakBrokenYesterday(user.streak, todayKey) || rescuableDead > 0) {
+      return {
+        type: 'makeup',
+        text: rescuableDead > 0
+          ? `有 ${rescuableDead} 株植物剛枯死！今天可花 ${makeUpInfo.cost} 能量補寫昨天立即救活`
+          : `昨天沒寫隨筆！可花 ${makeUpInfo.cost} 能量補寫昨天，保住連續天數與植物成長進度`,
+        action: 'makeup'
+      };
+    }
+  }
+
+  return null;
+}
+
+// 16. 篩選並排序首頁隨筆輪播（跨花園自己的所有隨筆 + 目前活動花園公開隨筆，排除示範舊資料，時間新到舊）
+export function selectCarouselEssays(gardens, uid, activeGardenId) {
+  const merged = new Map();
+  for (const g of Object.values(gardens || {})) {
+    if (!g) continue;
+    for (const e of g.essays || []) {
+      if (!e || e.id === 'essay_demo_welcome' || e.id === 'essay_welcome') continue;
+      if (Boolean(uid) && e.authorUid === uid) {
+        merged.set(e.id, e);
+      } else if (g.id === activeGardenId && !e.private) {
+        merged.set(e.id, e);
+      }
+    }
+  }
+  return Array.from(merged.values()).sort(
+    (a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)
+  );
+}
+
+// 17. 依 createdAt 由舊到新排序已評估區域清單，並將目前啟用中區域（activeRegionId 且非封存/快照）置於最後
+export function orderEvaluatedRegions(regionsWithEval, activeRegionId) {
+  const isActiveItem = item => Boolean(
+    activeRegionId
+    && item?.region?.id === activeRegionId
+    && (!item.region.status || item.region.status === 'active')
+  );
+  return [...(regionsWithEval || [])].sort((a, b) => {
+    const aActive = isActiveItem(a) ? 1 : 0;
+    const bActive = isActiveItem(b) ? 1 : 0;
+    if (aActive !== bActive) return aActive - bActive;
+    return Number(a?.region?.createdAt || 0) - Number(b?.region?.createdAt || 0);
+  });
+}

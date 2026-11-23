@@ -1,6 +1,21 @@
-// 隨筆花園：雲端傳輸深模組（封裝單一 POST text/plain 免預檢請求、永不過期 Session 與 AUTH_INVALID 通知）
+// 隨筆花園：雲端傳輸深模組（封裝單一 POST text/plain 免預檢請求、逾時中止、永不過期 Session 與 AUTH_INVALID 通知）
 
 export const SESSION_STORAGE_KEY = 'essay_garden_session_v1';
+const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
+
+function createClientError(message, code, cause) {
+  const err = new Error(message);
+  err.code = code;
+  if (cause !== undefined) err.cause = cause;
+  return err;
+}
+
+function mapAbortOrError(cause, timedOut, fallbackMessage, fallbackCode) {
+  if (timedOut || cause?.name === 'AbortError') {
+    return createClientError('雲端伺服器連線逾時，請稍後再試', 'TIMEOUT_ERROR', cause);
+  }
+  return createClientError(fallbackMessage, fallbackCode, cause);
+}
 
 export class CloudClient {
   constructor({
@@ -55,37 +70,58 @@ export class CloudClient {
       payload: payload || {}
     });
 
-    let response;
-    try {
-      response = await this.fetchImpl(this.gasWebAppUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        },
-        body
-      });
-    } catch (networkErr) {
-      const err = new Error('網路連線異常，請檢查網路狀態後再試');
-      err.code = 'NETWORK_ERROR';
-      err.cause = networkErr;
-      throw err;
-    }
+    const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    let timeoutId = null;
+    let timedOut = false;
+    let timeoutPromise = null;
 
-    if (!response || !response.ok) {
-      const err = new Error(`雲端伺服器回應異常 (HTTP ${response ? response.status : 'ERR'})`);
-      err.code = 'HTTP_ERROR';
-      throw err;
+    if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          if (controller) controller.abort();
+          const abortErr = new Error('雲端伺服器連線逾時，請稍後再試');
+          abortErr.name = 'AbortError';
+          reject(abortErr);
+        }, timeoutMs);
+      });
     }
+    const withTimeout = (promise) => (timeoutPromise ? Promise.race([promise, timeoutPromise]) : promise);
 
     let parsed;
     try {
-      const text = await response.text();
-      parsed = JSON.parse(text);
-    } catch (parseErr) {
-      const err = new Error('雲端伺服器回應格式無法解析');
-      err.code = 'PARSE_ERROR';
-      err.cause = parseErr;
-      throw err;
+      let response;
+      try {
+        const fetchInit = {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body
+        };
+        if (controller) {
+          fetchInit.signal = controller.signal;
+        }
+        response = await withTimeout(this.fetchImpl(this.gasWebAppUrl, fetchInit));
+      } catch (networkErr) {
+        throw mapAbortOrError(networkErr, timedOut, '網路連線異常，請檢查網路狀態後再試', 'NETWORK_ERROR');
+      }
+
+      if (!response || !response.ok) {
+        throw createClientError(`雲端伺服器回應異常 (HTTP ${response ? response.status : 'ERR'})`, 'HTTP_ERROR');
+      }
+
+      try {
+        const text = await withTimeout(response.text());
+        parsed = JSON.parse(text);
+      } catch (parseErr) {
+        throw mapAbortOrError(parseErr, timedOut, '雲端伺服器回應格式無法解析', 'PARSE_ERROR');
+      }
+    } finally {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+      }
     }
 
     if (typeof parsed?.serverTimeMs === 'number' && Number.isFinite(parsed.serverTimeMs)) {
@@ -95,9 +131,8 @@ export class CloudClient {
     }
 
     if (!parsed || parsed.ok !== true) {
-      const err = new Error(parsed?.message || '雲端操作失敗');
-      err.code = parsed?.code || 'UNKNOWN_ERROR';
-      if (err.code === 'AUTH_INVALID' && action !== 'auth') {
+      const err = createClientError(parsed?.message || '雲端操作失敗', parsed?.code || 'UNKNOWN_ERROR');
+      if (err.code === 'AUTH_INVALID' && action !== 'auth' && action !== 'logout') {
         this.clearSessionToken();
         if (typeof this.onAuthInvalid === 'function') {
           this.onAuthInvalid(err);

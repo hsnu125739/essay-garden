@@ -3,25 +3,15 @@ import {
   addDays,
   countEssayWords,
   getRarityProbabilities,
-  isLastDayOfMonth,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261123c';
-import {
-  GardenStore,
-  DEMO_ESSAY_ID,
-  DEMO_CARD_STYLE_KEY,
-  DEMO_REACTIONS_KEY,
-  getDemoEssayCardStyle,
-  saveDemoEssayCardStyle,
-  getDemoEssayReactions,
-  saveDemoEssayReactions
-} from './store.js?v=20261123c';
-import { CloudGardenStore } from './cloud-store.js?v=20261123c';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123c';
-import { bgManager } from './bg-manager.js?v=20261123c';
+} from './engine.js?v=20261123d';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261123d';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261123d';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261123d';
+import { bgManager } from './bg-manager.js?v=20261123d';
 
-const ASSET_VER = '20261123c';
+const ASSET_VER = '20261123d';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -45,20 +35,19 @@ function resolveEssayCardStyle(essay) {
   return CARD_STYLES[hash % CARD_STYLES.length];
 }
 
-const CARD_STYLE_STORAGE_KEY = 'essay_garden_card_style_v1';
-
-function savePreferredCardStyle(styleId) {
-  if (!CARD_STYLE_MAP[styleId]) return;
-  localStorage.setItem(CARD_STYLE_STORAGE_KEY, styleId);
+function isDemoEssay(essay) {
+  return essay?.id === DEMO_ESSAY_ID || essay?.id === 'essay_welcome' || Boolean(essay?.isDemo);
 }
 
-function getDefaultCardStyle(user) {
-  const saved = localStorage.getItem(CARD_STYLE_STORAGE_KEY);
-  if (saved && CARD_STYLE_MAP[saved]) return saved;
-  if (user?.lastCardStyle && CARD_STYLE_MAP[user.lastCardStyle]) {
-    return user.lastCardStyle;
-  }
-  return CARD_STYLES[0].id;
+function resolveEssayMeta(essay, uid, garden) {
+  const isDemo = isDemoEssay(essay);
+  const isAuthor = !isDemo && Boolean(essay?.authorUid) && essay.authorUid === uid;
+  const isGroup = !isDemo && garden?.type === 'group';
+  const hideReactions = isGroup && Boolean(essay?.private);
+  const authorDisplayName = isDemo
+    ? (essay?.authorName || '美地嚮導')
+    : store.getMemberDisplayName(essay?.authorUid);
+  return { isDemo, isAuthor, isGroup, hideReactions, authorDisplayName };
 }
 
 function memoStyleAttr(card) {
@@ -115,9 +104,12 @@ function bindCardPicker(rootEl, memoWrapEl, initialId, onChange) {
 let store;
 let config;
 let catalog;
-let lastIslandContext = null;
+let islandStage = null;
 let speciesRuleMap = {};
 let decorRuleMap = {};
+
+const INTERACTIVE_MODALS = new Set(['editor', 'read_essay', 'auth']);
+const renderedEssayMap = new Map();
 
 const ui = {
   screen: 'home', // 'home' | 'garden' | 'essays'
@@ -128,19 +120,21 @@ const ui = {
   activeModal: null,
   modalData: null,
   placingMode: null,
-  toastMsg: null,
-  pan: { x: 0, y: 0 },
-  zoom: 1,
-  didDrag: false,
-  carouselDidDrag: false,
-  suppressCardId: null,
-  suppressCardClickUntil: 0
+  carouselDidDrag: false
 };
 let essaysTransitionTimer = null;
 let pendingWriteLock = false;
 const loadingEssayMonths = new Set();
 
-async function runLockedAction(btnEl, loadingLabel, actionFn) {
+function resolveEssayById(essayId) {
+  if (!essayId) return null;
+  if (ui.activeModal === 'read_essay' && ui.modalData?.id === essayId) {
+    return ui.modalData;
+  }
+  return renderedEssayMap.get(essayId) || null;
+}
+
+async function runLockedAction(btnEl, loadingLabel, actionFn, onError = null) {
   if (pendingWriteLock || (btnEl && btnEl.disabled)) return;
   pendingWriteLock = true;
   let origHtml = null;
@@ -153,7 +147,8 @@ async function runLockedAction(btnEl, loadingLabel, actionFn) {
   try {
     await actionFn();
   } catch (err) {
-    showToast(err?.message || '操作失敗，請稍後再試');
+    if (onError) onError(err);
+    else showToast(err?.message || '操作失敗，請稍後再試');
   } finally {
     pendingWriteLock = false;
     if (btnEl && btnEl.isConnected) {
@@ -164,9 +159,24 @@ async function runLockedAction(btnEl, loadingLabel, actionFn) {
   }
 }
 
-function resetGardenView() {
-  ui.pan = { x: 0, y: 0 };
-  ui.zoom = 1;
+function syncMonthTransition() {
+  const monthTransition = store.checkMonthTransition();
+  if (monthTransition?.needsPersonalThemePick && ui.activeModal !== 'theme_picker') {
+    ui.activeModal = 'theme_picker';
+    ui.modalData = { month: monthTransition.month };
+  } else if (monthTransition?.autoResolvedGroupTheme) {
+    const tName = catalog.themes[monthTransition.autoResolvedGroupTheme]?.name;
+    showToast(`新月份開始！團體區域已定案為「${tName}」`);
+  }
+}
+
+function refreshAfterBackgroundSync() {
+  if (INTERACTIVE_MODALS.has(ui.activeModal)) {
+    renderScreen();
+    return;
+  }
+  syncMonthTransition();
+  renderApp();
 }
 
 function clearEssaysTransition() {
@@ -183,19 +193,30 @@ function clearEssaysTransition() {
   if (essaysHeader) essaysHeader.classList.remove('essays-header-in');
 }
 
+function resetViewingRegion() {
+  ui.viewingGardenId = null;
+  ui.viewingRegionId = null;
+}
+
+function startPlacingMode(mode, { resetView = false, screen = null } = {}) {
+  ui.placingMode = mode;
+  ui.activeModal = null;
+  if (resetView) resetViewingRegion();
+  if (screen) ui.screen = screen;
+  renderApp();
+}
+
 function goHome() {
-  closeReactionTray();
   ui.screen = 'home';
   ui.essaysAnim = null;
   ui.placingMode = null;
   ui.activeModal = null;
   clearEssaysTransition();
-  resetGardenView();
+  islandStage?.resetView();
   renderApp();
 }
 
 function openAllEssaysScreen() {
-  closeReactionTray();
   clearEssaysTransition();
   const homeEl = document.getElementById('screen-home');
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -223,7 +244,7 @@ function openAllEssaysScreen() {
 // ============================================================================
 // 1. 自製 24x24 圓角雙色 (Duotone) SVG 圖標系統（零系統 Emoji，符合 Cozy UI 規範）
 // ============================================================================
-export function icon(name, cls = 'w-4 h-4') {
+function icon(name, cls = 'w-4 h-4', style = '') {
   const paths = {
     sprout: `
       <path d="M12 21V11" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
@@ -291,7 +312,8 @@ export function icon(name, cls = 'w-4 h-4') {
       <path d="M12 3.2L14.2 9.2L20.2 11.4L14.2 13.6L12 19.6L9.8 13.6L3.8 11.4L9.8 9.2L12 3.2Z" fill="currentColor" fill-opacity="0.32" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"/>
       <circle cx="18.2" cy="5.6" r="1.2" fill="currentColor"/>`
   };
-  return `<svg viewBox="0 0 24 24" fill="none" class="${cls} shrink-0">${paths[name] || paths.sprout}</svg>`;
+  const styleAttr = style ? ` style="${style}"` : '';
+  return `<svg viewBox="0 0 24 24" fill="none" class="${cls} shrink-0"${styleAttr}>${paths[name] || paths.sprout}</svg>`;
 }
 
 // ============================================================================
@@ -311,7 +333,7 @@ const MOVE_CANCEL_PX = 10;
 const SLIDE_THRESHOLD_PX = 8;
 
 const reactionState = {
-  press: null, // { btnEl, essay, pointerId, startX, startY, timer, cancelled, trayOpened, didSlide }
+  press: null, // { btnEl, essay, pointerId, startX, startY, timer, cancelled, trayOpened }
   tray: null   // { btnEl, essay, hoveredId }
 };
 
@@ -353,28 +375,25 @@ function updateReactionBtnUI(btnEl, essay, uid, animate = false) {
   }
 }
 
+function setLocalEssayReaction(essay, uid, reactionId) {
+  if (!essay.reactions || typeof essay.reactions !== 'object') {
+    essay.reactions = {};
+  }
+  if (!reactionId) delete essay.reactions[uid];
+  else essay.reactions[uid] = reactionId;
+}
+
 function applyEssayReaction(essay, reactionId, sourceBtnEl = null) {
   const uid = store.state.currentUserId;
   const syncBtns = (animate) => {
     document.querySelectorAll(`[data-react-btn="${essay.id}"]`).forEach(b => {
-      const shouldAnimate = animate && !b.closest('#modal-box') && (!sourceBtnEl || b === sourceBtnEl);
+      const shouldAnimate = animate && b.dataset.trayAlign !== 'left' && (!sourceBtnEl || b === sourceBtnEl);
       updateReactionBtnUI(b, essay, uid, shouldAnimate);
     });
   };
 
-  const isDemo = essay.id === DEMO_ESSAY_ID || essay.id === 'essay_welcome' || Boolean(essay.isDemo);
-  if (isDemo) {
-    const demoReactions = getDemoEssayReactions();
-    if (demoReactions[uid] === reactionId) {
-      delete demoReactions[uid];
-    } else {
-      demoReactions[uid] = reactionId;
-    }
-    saveDemoEssayReactions(demoReactions);
-    essay.reactions = demoReactions;
-    syncBtns(true);
-    return;
-  }
+  const prevReactionsRef = essay.reactions;
+  const prevReactionsCopy = prevReactionsRef ? { ...prevReactionsRef } : {};
 
   let res;
   try {
@@ -383,12 +402,26 @@ function applyEssayReaction(essay, reactionId, sourceBtnEl = null) {
     showToast(err?.message || '無法設定反應');
     return;
   }
-  syncBtns(true);
+
   if (res && typeof res.then === 'function') {
-    res.then(() => syncBtns(false)).catch((err) => {
+    if (essay.reactions === prevReactionsRef && (essay.reactions?.[uid] || null) !== (reactionId || null)) {
+      essay.reactions = { ...prevReactionsCopy };
+      setLocalEssayReaction(essay, uid, reactionId);
+    }
+    syncBtns(true);
+    res.then((finalReaction) => {
+      setLocalEssayReaction(essay, uid, finalReaction ?? null);
+      syncBtns(false);
+    }).catch((err) => {
+      if (essay.reactions !== prevReactionsRef) {
+        essay.reactions = prevReactionsCopy;
+      }
       syncBtns(false);
       showToast(err?.message || '無法更新反應');
     });
+  } else {
+    setLocalEssayReaction(essay, uid, res ?? null);
+    syncBtns(true);
   }
 }
 
@@ -406,44 +439,58 @@ function openReactionTray(btnEl, essay) {
   const trayEl = document.getElementById('reaction-tray');
   if (!trayEl) return;
 
-  const cardEl = btnEl.closest('.essay-card');
-  const isModal = Boolean(btnEl.closest('#modal-box') || btnEl.closest('#modal-overlay'));
+  const isLeft = btnEl.dataset.trayAlign === 'left';
+  const cardEl = isLeft ? null : btnEl.closest('.essay-card');
 
-  // 1. 托盤尺寸與表情排列順序：
-  // 編輯頁面 (isModal): 托盤較大（按鈕 36x36），表情順序由左至右為 [love, cheer, hug, sprout, sparkle]，愛心在最左邊對齊按鈕
-  // 首頁隨筆卡片 (!isModal): 托盤適應卡片寬度（按鈕 27x27），表情順序由右至左（最右端為愛心，陣列為 [sparkle, sprout, hug, cheer, love]），愛心在最右邊對齊卡片右下角
-  const reactionList = isModal ? [...REACTIONS].reverse() : REACTIONS;
-  const optSizeCls = isModal ? 'w-[36px] h-[36px]' : 'w-[27px] h-[27px]';
-  const iconCls = isModal ? 'w-6 h-6' : 'w-[18px] h-[18px]';
-  const labelCls = isModal ? 'text-xs -top-7' : 'text-[10px] -top-6';
+  // 1. 托盤尺寸與表情排列順序（依顯式 data-tray-align="left|right" 決定）：
+  // 編輯／閱讀彈窗 (left): 較大托盤（36x36），順序由左至右為 [love, cheer, hug, sprout, sparkle]
+  // 首頁／列表卡片 (right): 適應卡片寬度（27x27），順序由右至左為 [sparkle, sprout, hug, cheer, love]
+  // 顯式 inline width/height 確保首次開啟同步量測 offsetWidth/offsetHeight 不受 Tailwind Play CDN 非同步 CSS 注入延遲影響
+  const reactionList = isLeft ? [...REACTIONS].reverse() : REACTIONS;
+  const optPx = isLeft ? 36 : 27;
+  const iconPx = isLeft ? 24 : 18;
+  const optSizeCls = isLeft ? 'w-[36px] h-[36px]' : 'w-[27px] h-[27px]';
+  const iconCls = isLeft ? 'w-6 h-6' : 'w-[18px] h-[18px]';
+  const labelCls = isLeft ? 'text-xs -top-7' : 'text-[10px] -top-6';
 
-  const trayWidth = isModal ? 236 : (cardEl ? Math.max(150, Math.round(cardEl.getBoundingClientRect().width)) : 160);
+  const cardRectW = cardEl ? cardEl.getBoundingClientRect().width : 0;
+  const trayWidth = isLeft ? 236 : (cardRectW > 0 ? Math.max(150, Math.round(cardRectW)) : 160);
   trayEl.style.width = `${trayWidth}px`;
+  trayEl.dataset.trayAlign = isLeft ? 'left' : 'right';
 
   trayEl.innerHTML = reactionList.map(r => `
     <button type="button" role="menuitem" data-reaction-opt="${r.id}" data-hovered="false" aria-label="${r.label}"
       class="reaction-opt relative ${optSizeCls} rounded-full flex items-center justify-center shrink-0 focus:outline-none"
-      style="background:${r.bg};color:${r.color}">
+      style="width:${optPx}px;height:${optPx}px;background:${r.bg};color:${r.color}">
       <span data-opt-label class="pointer-events-none absolute ${labelCls} left-1/2 px-1.5 py-0.5 rounded-full bg-[#1d4237] text-[#fffdf8] font-bold whitespace-nowrap shadow-sm">${r.label}</span>
-      ${icon(r.iconName, iconCls)}
+      ${icon(r.iconName, iconCls, `width:${iconPx}px;height:${iconPx}px`)}
     </button>
   `).join('');
 
-  // 先移除動畫取得未縮放精準寬度，再套用入場動畫與預設跳起愛心
+  // 先顯示且不套用 hover scale，動態量測 [data-reaction-opt="love"] 真實中心後再套用動畫與預設放大
   trayEl.classList.remove('hidden', 'reaction-tray-in');
 
   const btnRect = btnEl.getBoundingClientRect();
   const targetIcon = btnEl.querySelector('svg') || btnEl;
   const targetRect = targetIcon.getBoundingClientRect();
-  const targetCenterX = targetRect.left + targetRect.width / 2;
+  const targetCenterX = Number.isFinite(targetRect.left) && targetRect.width > 0
+    ? targetRect.left + targetRect.width / 2
+    : (Number(btnRect.left) || 0) + (Number(btnRect.width) || 0) / 2;
 
-  // 純粹幾何常數對齊：完全不受 CSS scale(1.42) 動態放大影響
-  // 編輯頁面 (isModal): 愛心在最左邊，左側 padding 10px + 按鈕半寬 18px = 28px，精準對齊實際顯示之愛心圖標中心
-  // 首頁卡片 (!isModal): 愛心在最右邊，trayWidth - 右側 padding 6px - 按鈕半寬 13.5px = trayWidth - 19.5px，精準對齊卡片右下角愛心圖標中心
-  const loveCenterOffset = isModal ? 28 : (trayWidth - 19.5);
+  const loveOpt = trayEl.querySelector('[data-reaction-opt="love"]');
+  const measuredLoveCenter = loveOpt && loveOpt.offsetWidth > 0
+    ? loveOpt.offsetLeft + loveOpt.offsetWidth / 2
+    : NaN;
+  const loveCenterOffset = Number.isFinite(measuredLoveCenter)
+    ? measuredLoveCenter
+    : (isLeft ? 24 : Math.max(16, trayWidth - 20));
 
-  const left = Math.max(8, Math.min(window.innerWidth - trayWidth - 8, targetCenterX - loveCenterOffset));
-  const top = Math.max(36, btnRect.top - (isModal ? 52 : 38) - 8);
+  const winW = window.innerWidth || trayWidth + 16;
+  const rawLeft = targetCenterX - loveCenterOffset;
+  const left = Math.max(8, Math.min(winW - trayWidth - 8, Number.isFinite(rawLeft) ? rawLeft : 8));
+  const trayHeight = trayEl.offsetHeight > 0 ? trayEl.offsetHeight : (isLeft ? 52 : 38);
+  const rawTop = (Number(btnRect.top) || 0) - trayHeight - 8;
+  const top = Math.max(36, Number.isFinite(rawTop) ? rawTop : 36);
   trayEl.style.left = `${left.toFixed(1)}px`;
   trayEl.style.top = `${top.toFixed(1)}px`;
 
@@ -452,14 +499,6 @@ function openReactionTray(btnEl, essay) {
 
   reactionState.tray = { btnEl, essay, hoveredId: null };
   setTrayHoveredOption('love');
-
-  trayEl.querySelectorAll('[data-reaction-opt]').forEach(opt => {
-    opt.onclick = (ev) => {
-      ev.stopPropagation();
-      applyEssayReaction(essay, opt.dataset.reactionOpt, btnEl);
-      closeReactionTray();
-    };
-  });
 }
 
 function closeReactionTray() {
@@ -468,7 +507,133 @@ function closeReactionTray() {
   reactionState.tray = null;
 }
 
-function initReactionTrayHandlers() {
+function initReactionTrayHandlers(appContainer = document.getElementById('app-container')) {
+  if (!appContainer) return;
+  let suppressEssayId = null;
+  let suppressTimer = null;
+  const clearClickSuppression = () => {
+    suppressEssayId = null;
+    clearTimeout(suppressTimer);
+  };
+  const armClickSuppression = (essayId) => {
+    suppressEssayId = essayId;
+    clearTimeout(suppressTimer);
+    suppressTimer = setTimeout(() => { suppressEssayId = null; }, 80);
+  };
+
+  // A new pointer interaction guarantees the prior pointerup->click cycle has finished
+  appContainer.addEventListener('pointerdown', clearClickSuppression, true);
+
+  appContainer.addEventListener('click', (e) => {
+    if (!suppressEssayId) return;
+    const hitCard = e.target.closest(`.essay-card[data-essay-id="${suppressEssayId}"]`);
+    const hitBtn = e.target.closest(`[data-react-btn="${suppressEssayId}"]`);
+    if (hitCard || hitBtn) {
+      clearClickSuppression();
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+
+  appContainer.addEventListener('pointerdown', (e) => {
+    const btnEl = e.target.closest('[data-react-btn]');
+    if (btnEl) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const essay = resolveEssayById(btnEl.dataset.reactBtn);
+      if (!essay) return;
+      e.preventDefault();
+      if (reactionState.press) {
+        clearTimeout(reactionState.press.timer);
+        reactionState.press = null;
+      }
+      if (reactionState.tray) {
+        const sameBtn = reactionState.tray.btnEl === btnEl;
+        closeReactionTray();
+        if (sameBtn) {
+          armClickSuppression(essay.id);
+          return;
+        }
+      }
+      const press = {
+        btnEl,
+        essay,
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        timer: null,
+        cancelled: false,
+        trayOpened: false
+      };
+      press.timer = setTimeout(() => {
+        if (reactionState.press !== press || press.cancelled) return;
+        press.trayOpened = true;
+        navigator.vibrate?.(12);
+        openReactionTray(btnEl, essay);
+      }, LONG_PRESS_MS);
+      reactionState.press = press;
+      return;
+    }
+
+    if (reactionState.tray && !reactionState.press && !e.target.closest('#reaction-tray')) {
+      closeReactionTray();
+    }
+  });
+
+  appContainer.addEventListener('click', (e) => {
+    const optEl = e.target.closest('[data-reaction-opt]');
+    if (optEl && reactionState.tray) {
+      e.stopPropagation();
+      applyEssayReaction(reactionState.tray.essay, optEl.dataset.reactionOpt, reactionState.tray.btnEl);
+      closeReactionTray();
+      return;
+    }
+
+    const btnEl = e.target.closest('[data-react-btn]');
+    if (btnEl) {
+      e.stopPropagation();
+      if (e.detail === 0) {
+        const essay = resolveEssayById(btnEl.dataset.reactBtn);
+        if (essay) {
+          const uid = store.state.currentUserId;
+          const cur = essay.reactions?.[uid] || null;
+          applyEssayReaction(essay, cur ? null : 'love', btnEl);
+        }
+        closeReactionTray();
+      }
+      return;
+    }
+
+    const cardEl = e.target.closest('.essay-card[data-essay-id]');
+    if (cardEl) {
+      if (ui.carouselDidDrag) return;
+      const essay = resolveEssayById(cardEl.dataset.essayId);
+      if (!essay) return;
+      ui.activeModal = 'read_essay';
+      ui.modalData = essay;
+      renderModal();
+    }
+  });
+
+  appContainer.addEventListener('keydown', (e) => {
+    if (!e.target.matches('.essay-card[data-essay-id]')) return;
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      const essay = resolveEssayById(e.target.dataset.essayId);
+      if (!essay) return;
+      ui.activeModal = 'read_essay';
+      ui.modalData = essay;
+      renderModal();
+    }
+  });
+
+  appContainer.addEventListener('contextmenu', (e) => {
+    if (e.target.closest('[data-react-btn]')) e.preventDefault();
+  });
+
+  appContainer.addEventListener('scroll', () => {
+    if (reactionState.tray) closeReactionTray();
+  }, { capture: true, passive: true });
+
   window.addEventListener('pointermove', (e) => {
     const press = reactionState.press;
     if (!press || e.pointerId !== press.pointerId) return;
@@ -483,7 +648,6 @@ function initReactionTrayHandlers() {
     }
 
     if (dist < SLIDE_THRESHOLD_PX) return;
-    press.didSlide = true;
     const trayEl = document.getElementById('reaction-tray');
     if (!trayEl || trayEl.classList.contains('hidden')) return;
 
@@ -519,9 +683,8 @@ function initReactionTrayHandlers() {
     clearTimeout(press.timer);
     reactionState.press = null;
 
-    if (!press.cancelled) {
-      ui.suppressCardId = press.essay.id;
-      ui.suppressCardClickUntil = Date.now() + 280;
+    if (!press.cancelled || press.trayOpened) {
+      armClickSuppression(press.essay.id);
     }
     if (e.type === 'pointercancel') {
       closeReactionTray();
@@ -546,67 +709,12 @@ function initReactionTrayHandlers() {
   window.addEventListener('pointerup', finishPress);
   window.addEventListener('pointercancel', finishPress);
 
-  document.addEventListener('pointerdown', (e) => {
-    if (!reactionState.tray || reactionState.press) return;
-    if (e.target.closest('#reaction-tray') || e.target.closest('[data-react-btn]')) return;
-    closeReactionTray();
-  });
-
   document.addEventListener('selectstart', (e) => {
     if (reactionState.press) e.preventDefault();
   });
 }
 
-function bindReactionTrigger(btnEl, essay) {
-  btnEl.onpointerdown = (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (reactionState.press) {
-      clearTimeout(reactionState.press.timer);
-      reactionState.press = null;
-    }
-    if (reactionState.tray) {
-      const sameBtn = reactionState.tray.btnEl === btnEl;
-      closeReactionTray();
-      if (sameBtn) {
-        ui.suppressCardClickUntil = Date.now() + 280;
-        return;
-      }
-    }
-    const press = {
-      btnEl,
-      essay,
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      startY: e.clientY,
-      timer: null,
-      cancelled: false,
-      trayOpened: false,
-      didSlide: false
-    };
-    press.timer = setTimeout(() => {
-      if (reactionState.press !== press || press.cancelled) return;
-      press.trayOpened = true;
-      navigator.vibrate?.(12);
-      openReactionTray(btnEl, essay);
-    }, LONG_PRESS_MS);
-    reactionState.press = press;
-  };
-  btnEl.onclick = (e) => {
-    e.stopPropagation();
-    if (e.detail === 0) {
-      const uid = store.state.currentUserId;
-      const cur = essay.reactions?.[uid] || null;
-      applyEssayReaction(essay, cur ? null : 'love', btnEl);
-      closeReactionTray();
-    }
-  };
-  btnEl.oncontextmenu = (e) => e.preventDefault();
-}
-
 function showToast(msg) {
-  ui.toastMsg = msg;
   const el = document.getElementById('toast-bar');
   if (el) {
     el.textContent = msg;
@@ -619,36 +727,6 @@ function showToast(msg) {
 // ============================================================================
 // 2. 2.5D 手繪圖素映射與等距島嶼渲染引擎（縮放基準與單格寬度皆讀取自 game-config.json spriteScale）
 // ============================================================================
-const spriteSizeCache = new Map();
-let spriteRenderQueued = false;
-
-function getSpriteDims(path, fallbackSize) {
-  const cached = spriteSizeCache.get(path);
-  if (cached && cached !== 'loading') return cached;
-  if (!cached) {
-    spriteSizeCache.set(path, 'loading');
-    const img = new Image();
-    img.onload = () => {
-      spriteSizeCache.set(path, {
-        w: img.naturalWidth || fallbackSize,
-        h: img.naturalHeight || fallbackSize
-      });
-      if (!spriteRenderQueued) {
-        spriteRenderQueued = true;
-        requestAnimationFrame(() => {
-          spriteRenderQueued = false;
-          if (lastIslandContext) renderActiveIslandSvg(lastIslandContext.viewGarden, lastIslandContext.evalData);
-        });
-      }
-    };
-    img.onerror = () => {
-      spriteSizeCache.set(path, { w: fallbackSize, h: fallbackSize });
-    };
-    img.src = `${path}?v=${ASSET_VER}`;
-  }
-  return { w: fallbackSize, h: fallbackSize };
-}
-
 function parseSizeRule(ruleStr) {
   const s = String(ruleStr || '').trim().toUpperCase();
   const mode = s[0] === 'W' ? 'width' : (s[0] === 'H' ? 'height' : null);
@@ -731,115 +809,33 @@ function getDecorSpriteSpec(itemId) {
 }
 
 // 渲染單株植物預覽（用於彈窗詳情、開種子畫面與圖鑑卡片）
-function renderPlantPreviewHTML(sp, fakePlantState) {
-  const spec = getPlantSpriteSpec(sp, fakePlantState);
+function renderPlantPreviewHTML(sp, plantState = null) {
+  const state = plantState || {
+    requiredDays: sp.requiredDays,
+    evalState: { stage: 'grown', progress: sp.requiredDays, miss: 0, isPerfect: true, hadWilt: false }
+  };
+  const spec = getPlantSpriteSpec(sp, state);
   return `<img src="${spec.path}?v=${ASSET_VER}" alt="${escapeHtml(sp.name)}" class="w-full h-full object-contain drop-shadow-sm"/>`;
 }
 
-// 計算立體浮空島上表面格子 (x, y) 對應到 SVG 舞台的座標
+// 島嶼幾何唯一事實來源：由 ISLAND_DIMS 與 tileWidth 單一推導單格尺寸與島嶼上下極值
 const BASE_GRID_N = 5;
-const FIXED_CELL_W = 172 / BASE_GRID_N; // 34.4px
-const FIXED_CELL_H = 91 / BASE_GRID_N;  // 18.2px
-
-function gridCellToIslandCoord(x, y, N) {
-  const islandScale = N / BASE_GRID_N;
-  const u = (x + 0.5) / N;
-  const v = (y + 0.5) / N;
-  const halfW = 172 * islandScale;
-  const halfH = 91 * islandScale;
-  const centerY = -64 * islandScale;
-  return {
-    x: (u - v) * halfW,
-    y: centerY + (u + v - 1.0) * halfH,
-    cellW: FIXED_CELL_W,
-    cellH: FIXED_CELL_H
-  };
-}
-
-function getIslandTransform(pan, zoom) {
-  const p = pan || { x: 0, y: 0 };
-  const z = zoom || 1;
-  return `translate(${p.x.toFixed(1)}, ${p.y.toFixed(1)}) scale(${z.toFixed(3)})`;
-}
-
-const ISLAND_X_EDGE_PAD_PX = 20;
-const ISLAND_BOT_PAD_PX = 84;
-const ISLAND_FULL_TOP_PAD_PX = 44; // 最高樹冠（(0,0) 完美神木）距全螢幕上方橫幅留白
-
-function clampIslandPan(containerEl, svgEl, px, py, z, { topPadPx = ISLAND_FULL_TOP_PAD_PX } = {}) {
-  const cr = containerEl.getBoundingClientRect();
-  const sr = svgEl.getBoundingClientRect();
-  const vb = svgEl.viewBox.baseVal;
-  if (!cr.width || !cr.height || !sr.width || !sr.height || !vb.width || !vb.height) {
-    return { x: px, y: py };
-  }
-
-  const scale = Math.min(sr.width / vb.width, sr.height / vb.height);
-  const vbCx = vb.x + vb.width / 2;
-  const vbCy = vb.y + vb.height / 2;
-  const halfStageW = (cr.width / 2) / scale;
-  const halfStageH = (cr.height / 2) / scale;
-  const stageTop = vbCy - halfStageH;
-  const stageBottom = vbCy + halfStageH;
-
-  const regionSize = lastIslandContext?.evalData?.region?.size || BASE_GRID_N;
-  const islandScale = regionSize / BASE_GRID_N;
-  const landHalfW = 210 * islandScale;
-  const islandTop = -155 * islandScale - 62.3;
-  const grassBottom = 27 * islandScale;
-
-  // c & d：土地寬度 <= 視口寬度時一律水平置中；寬於視口時左右端點距螢幕邊界最多 ISLAND_X_EDGE_PAD_PX（過渡平滑無跳動）
-  const overflowX = z * landHalfW - halfStageW;
-  const maxPanX = overflowX <= 0 ? 0 : overflowX + Math.min(ISLAND_X_EDGE_PAD_PX / scale, overflowX);
-  const rawX = Math.max(vbCx - maxPanX, Math.min(vbCx + maxPanX, px));
-  const x = rawX === 0 ? 0 : rawX;
-
-  // a：往下移動限制維持現狀 220 * max(1, z)
-  const maxPy = 220 * Math.max(1, z);
-  // b：往上移動不可碰到上方橫幅或隨筆區並保持恰當距離（若深度放大導致草地本身高於視口，允許上移至底部草地恰好進入視口）
-  const minPyTop = (stageTop + topPadPx / scale) - z * islandTop;
-  const minPyBot = (stageBottom - ISLAND_BOT_PAD_PX / scale) - z * grassBottom;
-  const minPy = Math.min(0, Math.min(maxPy, Math.min(minPyTop, minPyBot)));
-  const rawY = Math.max(minPy, Math.min(maxPy, py));
-  const y = rawY === 0 ? 0 : rawY;
-
-  return { x, y };
-}
+const DEFAULT_TILE_WIDTH = 68.8;
+const BASE_GRID_HALF_H = 91;
+const BASE_GRID_CENTER_Y = -64;
+const BASE_ISLAND_TOP_Y = -175;
+const CANOPY_HEADROOM = 62.3;
 
 const HOME_VB_X = -215;
 const HOME_VB_W = 430;
 const HOME_VB_H = 450;
-
-function alignHomeIslandViewBox(regionSize) {
-  const homeCard = document.getElementById('home-garden-card');
-  const homeSvg = document.getElementById('home-island-svg');
-  const carousel = document.getElementById('essay-carousel');
-  const pill = document.querySelector('#home-floating-info .sky-pill');
-  if (!homeCard || !homeSvg || !carousel || !pill) return;
-
-  const cr = homeCard.getBoundingClientRect();
-  const sr = homeSvg.getBoundingClientRect();
-  if (!cr.width || !cr.height || !sr.width || !sr.height) return;
-
-  const scale = Math.min(sr.width / HOME_VB_W, sr.height / HOME_VB_H);
-  const padBot = parseFloat(getComputedStyle(carousel).paddingBottom) || 0;
-  const zoneTop = carousel.getBoundingClientRect().bottom - padBot;
-  const zoneBottom = pill.getBoundingClientRect().top;
-  const targetScreenY = (zoneTop + zoneBottom) / 2;
-  const svgBaseCenterY = cr.top + cr.height / 2;
-
-  const islandScale = (regionSize || BASE_GRID_N) / BASE_GRID_N;
-  const islW = 420 * islandScale;
-  const centerLocalY = -175 * islandScale + 0.3 * islW;
-
-  const vbCy = centerLocalY - (targetScreenY - svgBaseCenterY) / scale;
-  const vbY = vbCy - HOME_VB_H / 2;
-  homeSvg.setAttribute('viewBox', `${HOME_VB_X} ${vbY.toFixed(1)} ${HOME_VB_W} ${HOME_VB_H}`);
-}
-
 const FULL_VB_X = -300;
 const FULL_VB_W = 600;
 const FULL_VB_H = 580;
+
+const ISLAND_X_EDGE_PAD_PX = 20;
+const ISLAND_BOT_PAD_PX = 84;
+const ISLAND_FULL_TOP_PAD_PX = 44; // 最高樹冠（(0,0) 完美神木）距全螢幕上方橫幅留白
 
 // 5x5~9x9 島嶼底座已實體裁切去除底部無意義純透明空白
 // 此處對應各尺寸在 SVG 幾何空間中的真實寬高
@@ -851,64 +847,208 @@ const ISLAND_DIMS = {
   9: { w: 756, h: 645 }
 };
 
-function alignFullIslandViewBox(regionSize) {
-  const fullSvg = document.getElementById('full-island-svg');
-  if (!fullSvg) return;
-  const sr = fullSvg.getBoundingClientRect();
-  if (!sr.width || !sr.height) return;
-
-  const scale = Math.min(sr.width / FULL_VB_W, sr.height / FULL_VB_H);
-  const winH = window.innerHeight;
-  const navEl = document.getElementById('garden-bottom-nav');
-  const navTop = navEl ? navEl.getBoundingClientRect().top : winH - 65;
-
-  const N = Math.min(9, Math.max(5, regionSize || BASE_GRID_N));
-  const dims = ISLAND_DIMS[N] || { w: 420 * (N / BASE_GRID_N), h: 410 * (N / BASE_GRID_N) };
-  const islY = -175 * (N / BASE_GRID_N);
+function getIslandGeometry(regionSize, dimsTable = ISLAND_DIMS, tileWidth = DEFAULT_TILE_WIDTH) {
+  const N = Math.min(9, Math.max(BASE_GRID_N, Number(regionSize) || BASE_GRID_N));
+  const islandScale = N / BASE_GRID_N;
+  const baseDims = dimsTable[BASE_GRID_N] || ISLAND_DIMS[BASE_GRID_N];
+  const dims = dimsTable[N] || { w: baseDims.w * islandScale, h: baseDims.h * islandScale };
+  const islW = dims.w;
   const islH = dims.h;
-  const bottomY = islY + islH;
-  const centerY = islY + islH / 2;
+  const islX = -islW / 2;
+  const islY = BASE_ISLAND_TOP_Y * islandScale;
+  const cellW = (Number(tileWidth) || DEFAULT_TILE_WIDTH) / 2;
+  const cellH = BASE_GRID_HALF_H / BASE_GRID_N;
+  const gridCenterY = BASE_GRID_CENTER_Y * islandScale;
+  const gridHalfH = BASE_GRID_HALF_H * islandScale;
+  return {
+    N,
+    islandScale,
+    islW,
+    islH,
+    islX,
+    islY,
+    landHalfW: islW / 2,
+    bottomY: islY + islH,
+    fullCenterY: islY + islH / 2,
+    homeCenterY: islY + 0.3 * islW,
+    cellW,
+    cellH,
+    gridHalfW: cellW * N,
+    gridHalfH,
+    gridCenterY,
+    islandTop: gridCenterY - gridHalfH - CANOPY_HEADROOM,
+    grassBottom: gridCenterY + gridHalfH
+  };
+}
 
-  // 目標中心：對齊至視窗中心下方 50px（使用者原則：中心高度 = 視窗中心高度 + 50px）；底線：泥土尖端絕不插入最下方選單
+function gridCellToIslandCoord(x, y, N, tileWidth = config?.spriteScale?.tileWidth || DEFAULT_TILE_WIDTH) {
+  const geom = getIslandGeometry(N, ISLAND_DIMS, tileWidth);
+  const u = (x + 0.5) / geom.N;
+  const v = (y + 0.5) / geom.N;
+  return {
+    x: (u - v) * geom.gridHalfW,
+    y: geom.gridCenterY + (u + v - 1.0) * geom.gridHalfH,
+    cellW: geom.cellW,
+    cellH: geom.cellH
+  };
+}
+
+function getIslandTransform(pan, zoom) {
+  const p = pan || { x: 0, y: 0 };
+  const z = zoom || 1;
+  return `translate(${p.x.toFixed(1)}, ${p.y.toFixed(1)}) scale(${z.toFixed(3)})`;
+}
+
+/**
+ * Compute uniform SVG preserveAspectRatio="xMidYMid meet" scale from element rect to viewBox.
+ * @param {{ width: number, height: number }} rect
+ * @param {{ width: number, height: number }} vb
+ * @returns {number}
+ */
+export function computeSvgViewportScale(rect, vb) {
+  if (!rect || !vb) return 0;
+  const rw = Number(rect.width);
+  const rh = Number(rect.height);
+  const vw = Number(vb.width);
+  const vh = Number(vb.height);
+  if (!(rw > 0) || !(rh > 0) || !(vw > 0) || !(vh > 0)) return 0;
+  return Math.min(rw / vw, rh / vh);
+}
+
+/**
+ * Compute aligned SVG viewBox metrics for 'home' or 'full' island mode without DOM access.
+ * @param {'home' | 'full'} mode
+ * @param {number} regionSize
+ * @param {{ svgRect: { top: number, width: number, height: number }, cardRect?: { top: number, width: number, height: number }, zoneTop?: number, zoneBottom?: number, targetScreenY?: number, winH?: number, navTop?: number }} viewport
+ * @param {Record<number, { w: number, h: number }>} [dims=ISLAND_DIMS]
+ * @returns {{ x: number, y: number, width: number, height: number, scale: number, viewBox: string } | null}
+ */
+export function computeIslandViewBox(mode, regionSize, viewport, dims = ISLAND_DIMS) {
+  if (mode !== 'home' && mode !== 'full') {
+    throw new Error(`Invalid island viewBox mode: ${mode}`);
+  }
+  if (!viewport || !viewport.svgRect) return null;
+
+  const geom = getIslandGeometry(regionSize, dims);
+  if (mode === 'home') {
+    const sr = viewport.svgRect;
+    const cr = viewport.cardRect || sr;
+    const scale = computeSvgViewportScale(sr, { width: HOME_VB_W, height: HOME_VB_H });
+    if (!scale || !(Number(cr.width) > 0) || !(Number(cr.height) > 0)) return null;
+    const targetScreenY = Number.isFinite(viewport.targetScreenY)
+      ? Number(viewport.targetScreenY)
+      : (Number(viewport.zoneTop) + Number(viewport.zoneBottom)) / 2;
+    const svgBaseCenterY = Number(cr.top) + Number(cr.height) / 2;
+    if (!Number.isFinite(targetScreenY) || !Number.isFinite(svgBaseCenterY)) return null;
+    const vbCy = geom.homeCenterY - (targetScreenY - svgBaseCenterY) / scale;
+    const y = vbCy - HOME_VB_H / 2;
+    return {
+      x: HOME_VB_X,
+      y,
+      width: HOME_VB_W,
+      height: HOME_VB_H,
+      scale,
+      viewBox: `${HOME_VB_X} ${y.toFixed(1)} ${HOME_VB_W} ${HOME_VB_H}`
+    };
+  }
+
+  const sr = viewport.svgRect;
+  const scale = computeSvgViewportScale(sr, { width: FULL_VB_W, height: FULL_VB_H });
+  const winH = Number(viewport.winH);
+  if (!scale || !Number.isFinite(winH)) return null;
+  const navTop = Number.isFinite(viewport.navTop) ? Number(viewport.navTop) : winH - 65;
+  // 目標中心：對齊至視窗中心下方 50px；底線：泥土尖端絕不插入最下方選單
   const targetScreenY = winH / 2 + 50;
-  const svgBaseCenterY = sr.top + sr.height / 2;
-  const vbCyTarget = centerY - (targetScreenY - svgBaseCenterY) / scale;
-  const vbCyMin = bottomY - ((navTop - 12) - svgBaseCenterY) / scale;
+  const svgBaseCenterY = Number(sr.top) + Number(sr.height) / 2;
+  if (!Number.isFinite(svgBaseCenterY)) return null;
+  const vbCyTarget = geom.fullCenterY - (targetScreenY - svgBaseCenterY) / scale;
+  const vbCyMin = geom.bottomY - ((navTop - 12) - svgBaseCenterY) / scale;
   const vbCy = Math.max(vbCyTarget, vbCyMin);
-  const vbY = vbCy - FULL_VB_H / 2;
-  fullSvg.setAttribute('viewBox', `${FULL_VB_X} ${vbY.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`);
+  const y = vbCy - FULL_VB_H / 2;
+  return {
+    x: FULL_VB_X,
+    y,
+    width: FULL_VB_W,
+    height: FULL_VB_H,
+    scale,
+    viewBox: `${FULL_VB_X} ${y.toFixed(1)} ${FULL_VB_W} ${FULL_VB_H}`
+  };
+}
+
+/**
+ * Clamp island pan (x, y) within safe viewport bounds for the given zoom and region size.
+ * @param {{ containerRect: { width: number, height: number }, svgRect: { width: number, height: number }, viewBox: { x: number, y: number, width: number, height: number }, panX?: number, panY?: number, zoom?: number, regionSize?: number, topPadPx?: number, botPadPx?: number, xEdgePadPx?: number, dims?: Record<number, { w: number, h: number }> }} [params]
+ * @returns {{ x: number, y: number }}
+ */
+export function clampIslandPanMetrics({
+  containerRect,
+  svgRect,
+  viewBox,
+  panX = 0,
+  panY = 0,
+  zoom = 1,
+  regionSize = BASE_GRID_N,
+  topPadPx = ISLAND_FULL_TOP_PAD_PX,
+  botPadPx = ISLAND_BOT_PAD_PX,
+  xEdgePadPx = ISLAND_X_EDGE_PAD_PX,
+  dims = ISLAND_DIMS
+} = {}) {
+  const px = Number(panX) || 0;
+  const py = Number(panY) || 0;
+  const z = Number(zoom) || 1;
+  const scale = computeSvgViewportScale(svgRect, viewBox);
+  if (
+    !containerRect ||
+    !(Number(containerRect.width) > 0) ||
+    !(Number(containerRect.height) > 0) ||
+    !scale
+  ) {
+    return { x: px, y: py };
+  }
+
+  const vbCx = Number(viewBox.x) + Number(viewBox.width) / 2;
+  const vbCy = Number(viewBox.y) + Number(viewBox.height) / 2;
+  const halfStageW = (Number(containerRect.width) / 2) / scale;
+  const halfStageH = (Number(containerRect.height) / 2) / scale;
+  const stageTop = vbCy - halfStageH;
+  const stageBottom = vbCy + halfStageH;
+
+  const geom = getIslandGeometry(regionSize, dims);
+  const overflowX = z * geom.landHalfW - halfStageW;
+  const maxPanX = overflowX <= 0 ? 0 : overflowX + Math.min(xEdgePadPx / scale, overflowX);
+  const rawX = Math.max(vbCx - maxPanX, Math.min(vbCx + maxPanX, px));
+  const x = rawX === 0 ? 0 : rawX;
+
+  const maxPy = 220 * Math.max(1, z);
+  const minPyTop = (stageTop + topPadPx / scale) - z * geom.islandTop;
+  const minPyBot = (stageBottom - botPadPx / scale) - z * geom.grassBottom;
+  const minPy = Math.min(0, Math.min(maxPy, Math.min(minPyTop, minPyBot)));
+  const rawY = Math.max(minPy, Math.min(maxPy, py));
+  const y = rawY === 0 ? 0 : rawY;
+
+  return { x, y };
 }
 
 function renderIsometricIsland(evalData, options = {}) {
   const { region, plantsWithState, decorList } = evalData;
-  const N = region.size;
   const theme = region.theme || 'flowerbed';
   const isPlacing = Boolean(options.placingMode);
   const pan = options.pan || { x: 0, y: 0 };
   const zoom = options.zoom || 1;
+  const resolveSpriteDims = options.getSpriteDims;
 
-  // 依當前尺寸 N 取得已裁切底座之幾何尺寸（寬度依照 N / 5 等比放大，高度為素材真實高度）
-  const clampedN = Math.min(9, Math.max(5, N));
-  const dims = ISLAND_DIMS[clampedN] || { w: 420 * (clampedN / BASE_GRID_N), h: 410 * (clampedN / BASE_GRID_N) };
-  const islW = dims.w;
-  const islH = dims.h;
-  const islX = -islW / 2;
-  const islY = -175 * (clampedN / BASE_GRID_N);
-
-  // 1. 底層：載入已實體裁切之 2.5D 立體浮空島底座圖
-  const svg = `
-    <image href="./assets/islands/${theme}_${clampedN}x${clampedN}.png?v=${ASSET_VER}" x="${islX.toFixed(1)}" y="${islY.toFixed(1)}" width="${islW.toFixed(1)}" height="${islH.toFixed(1)}" preserveAspectRatio="none"/>`;
-
-  // 2. 依設定檔 spriteScale 規格與等距網格動態換算渲染大小，再交由 computeNeighborAdjustedScales 處理相鄰等比縮小
   const { standardSpriteWidth, tileWidth, maxAdjacentTiles } = config.spriteScale;
-  const maxAdjacentWidth = tileWidth * maxAdjacentTiles;
+  const geom = getIslandGeometry(region.size, ISLAND_DIMS, tileWidth);
+  const svg = `
+    <image href="./assets/islands/${theme}_${geom.N}x${geom.N}.png?v=${ASSET_VER}" x="${geom.islX.toFixed(1)}" y="${geom.islY.toFixed(1)}" width="${geom.islW.toFixed(1)}" height="${geom.islH.toFixed(1)}" preserveAspectRatio="none"/>`;
 
+  const maxAdjacentWidth = tileWidth * maxAdjacentTiles;
   const byCoord = new Map();
   const scaleInputs = [];
   const registerEntry = (x, y, spec) => {
     const key = `${Number(x)},${Number(y)}`;
     if (byCoord.has(key)) return;
-    const dims = getSpriteDims(spec.path, standardSpriteWidth);
+    const dims = resolveSpriteDims(spec.path, standardSpriteWidth);
     const { renderW, renderH } = getSpriteRenderDims(spec, dims, config.spriteScale);
     byCoord.set(key, { spec, dims, width: renderW, height: renderH });
     scaleInputs.push({ key, x: Number(x), y: Number(y), width: renderW });
@@ -924,10 +1064,9 @@ function renderIsometricIsland(evalData, options = {}) {
 
   const effectiveWidths = computeNeighborAdjustedScales(scaleInputs, maxAdjacentWidth);
 
-  // 3. 依畫家演算法 (x + y 由小到大) 排序繪製每格植物與裝飾
   const coords = [];
-  for (let x = 0; x < N; x++) {
-    for (let y = 0; y < N; y++) coords.push({ x, y });
+  for (let x = 0; x < geom.N; x++) {
+    for (let y = 0; y < geom.N; y++) coords.push({ x, y });
   }
   coords.sort((a, b) => (a.x + a.y) - (b.x + b.y) || (a.x - a.y) - (b.x - b.y));
 
@@ -935,7 +1074,7 @@ function renderIsometricIsland(evalData, options = {}) {
   let hitAndSlotsLayer = '';
 
   for (const { x, y } of coords) {
-    const c = gridCellToIslandCoord(x, y, N);
+    const c = gridCellToIslandCoord(x, y, geom.N, tileWidth);
     const key = `${x},${y}`;
     const entry = byCoord.get(key);
     const isOccupied = Boolean(entry);
@@ -948,7 +1087,6 @@ function renderIsometricIsland(evalData, options = {}) {
       spritesLayer += `<image href="${entry.spec.path}?v=${ASSET_VER}" x="${sx.toFixed(1)}" y="${sy.toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" ${isPlacing ? 'opacity="0.38"' : ''} style="pointer-events:none;"/>`;
     }
 
-    // 頂層（Top Layer）：空位光圈與菱形點擊感應區畫在所有植物的最上方，絕不被前排植物圖案遮擋！
     if (isPlacing && !isOccupied) {
       hitAndSlotsLayer += `
         <ellipse cx="${c.x.toFixed(1)}" cy="${c.y.toFixed(1)}" rx="${(c.cellW * 0.58).toFixed(1)}" ry="${(c.cellH * 0.58).toFixed(1)}"
@@ -968,6 +1106,256 @@ function renderIsometricIsland(evalData, options = {}) {
   }
 
   return `<g class="island-pan-layer" transform="${getIslandTransform(pan, zoom)}">${svg}${spritesLayer}${hitAndSlotsLayer}</g>`;
+}
+
+function createIslandStage({ getScreen, isPlacingMode, onCellClick }) {
+  let context = null;
+  let pan = { x: 0, y: 0 };
+  let zoom = 1;
+  let didDrag = false;
+  const spriteSizeCache = new Map();
+  let spriteRenderQueued = false;
+
+  const getSpriteDims = (path, fallbackSize) => {
+    const cached = spriteSizeCache.get(path);
+    if (cached && cached !== 'loading') return cached;
+    if (!cached) {
+      spriteSizeCache.set(path, 'loading');
+      const img = new Image();
+      img.onload = () => {
+        spriteSizeCache.set(path, {
+          w: img.naturalWidth || fallbackSize,
+          h: img.naturalHeight || fallbackSize
+        });
+        if (!spriteRenderQueued) {
+          spriteRenderQueued = true;
+          requestAnimationFrame(() => {
+            spriteRenderQueued = false;
+            if (context) render(context.viewGarden, context.evalData);
+          });
+        }
+      };
+      img.onerror = () => {
+        spriteSizeCache.set(path, { w: fallbackSize, h: fallbackSize });
+      };
+      img.src = `${path}?v=${ASSET_VER}`;
+    }
+    return { w: fallbackSize, h: fallbackSize };
+  };
+
+  const alignViewBox = (mode, regionSize) => {
+    if (mode === 'home') {
+      const homeCard = document.getElementById('home-garden-card');
+      const homeSvg = document.getElementById('home-island-svg');
+      const carousel = document.getElementById('essay-carousel');
+      const pill = document.querySelector('#home-floating-info .sky-pill');
+      if (!homeCard || !homeSvg || !carousel || !pill) return;
+      const padBot = parseFloat(getComputedStyle(carousel).paddingBottom) || 0;
+      const res = computeIslandViewBox('home', regionSize, {
+        svgRect: homeSvg.getBoundingClientRect(),
+        cardRect: homeCard.getBoundingClientRect(),
+        zoneTop: carousel.getBoundingClientRect().bottom - padBot,
+        zoneBottom: pill.getBoundingClientRect().top
+      });
+      if (res) homeSvg.setAttribute('viewBox', res.viewBox);
+      return;
+    }
+
+    const fullSvg = document.getElementById('full-island-svg');
+    if (!fullSvg) return;
+    const winH = window.innerHeight;
+    const navEl = document.getElementById('garden-bottom-nav');
+    const res = computeIslandViewBox('full', regionSize, {
+      svgRect: fullSvg.getBoundingClientRect(),
+      winH,
+      navTop: navEl ? navEl.getBoundingClientRect().top : winH - 65
+    });
+    if (res) fullSvg.setAttribute('viewBox', res.viewBox);
+  };
+
+  const clampPan = (containerEl, svgEl, px, py, z) => clampIslandPanMetrics({
+    containerRect: containerEl.getBoundingClientRect(),
+    svgRect: svgEl.getBoundingClientRect(),
+    viewBox: svgEl.viewBox.baseVal,
+    panX: px,
+    panY: py,
+    zoom: z,
+    regionSize: context?.evalData?.region?.size || BASE_GRID_N,
+    topPadPx: ISLAND_FULL_TOP_PAD_PX
+  });
+
+  const render = (viewGarden, evalData) => {
+    context = { viewGarden, evalData };
+    if (getScreen() === 'home') {
+      const homeSvg = document.getElementById('home-island-svg');
+      alignViewBox('home', evalData.region.size);
+      homeSvg.innerHTML = renderIsometricIsland(evalData, {
+        interactive: false,
+        placingMode: false,
+        pan: { x: 0, y: 0 },
+        zoom: 1,
+        getSpriteDims
+      });
+      requestAnimationFrame(() => {
+        if (getScreen() === 'home' && context) alignViewBox('home', context.evalData.region.size);
+      });
+      return;
+    }
+
+    const fullVp = document.getElementById('full-garden-viewport');
+    const fullSvg = document.getElementById('full-island-svg');
+    alignViewBox('full', evalData.region.size);
+    pan = clampPan(fullVp, fullSvg, pan.x, pan.y, zoom);
+    fullSvg.innerHTML = renderIsometricIsland(evalData, {
+      interactive: true,
+      placingMode: isPlacingMode(),
+      pan,
+      zoom,
+      getSpriteDims
+    });
+    requestAnimationFrame(() => {
+      if (getScreen() === 'garden' && context) alignViewBox('full', context.evalData.region.size);
+    });
+  };
+
+  const alignActiveViewBox = () => {
+    if (!context) return;
+    const screen = getScreen();
+    if (screen === 'home') alignViewBox('home', context.evalData.region.size);
+    else if (screen === 'garden') alignViewBox('full', context.evalData.region.size);
+  };
+
+  const resetView = () => {
+    pan = { x: 0, y: 0 };
+    zoom = 1;
+  };
+
+  const bind = () => {
+    const containerEl = document.getElementById('full-garden-viewport');
+    const svgEl = document.getElementById('full-island-svg');
+    if (!containerEl || !svgEl) return;
+
+    const activePointers = new Map();
+    let panStart = null;
+    let pinchStart = null;
+
+    const applyTransform = () => {
+      const g = svgEl.querySelector('.island-pan-layer');
+      if (g) g.setAttribute('transform', getIslandTransform(pan, zoom));
+    };
+
+    const applyZoomFrom = (targetZoom, anchorVb, origZoom, origPanX, origPanY, origVb = anchorVb) => {
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom));
+      const ratio = newZoom / origZoom;
+      zoom = newZoom;
+      pan = clampPan(
+        containerEl,
+        svgEl,
+        anchorVb.x - (origVb.x - origPanX) * ratio,
+        anchorVb.y - (origVb.y - origPanY) * ratio,
+        newZoom
+      );
+      applyTransform();
+    };
+
+    const screenToVb = (clientX, clientY) => {
+      const rect = svgEl.getBoundingClientRect();
+      const vb = svgEl.viewBox.baseVal;
+      const scale = computeSvgViewportScale(rect, vb) || 1;
+      return {
+        x: vb.x + vb.width / 2 + (clientX - (rect.left + rect.width / 2)) / scale,
+        y: vb.y + vb.height / 2 + (clientY - (rect.top + rect.height / 2)) / scale,
+        pxToVb: 1 / scale
+      };
+    };
+
+    const startPinch = () => {
+      const [p1, p2] = [...activePointers.values()];
+      const dist = Math.max(10, Math.hypot(p2.x - p1.x, p2.y - p1.y));
+      const midVb = screenToVb((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+      pinchStart = { dist, midVbX: midVb.x, midVbY: midVb.y, zoom, panX: pan.x, panY: pan.y };
+      panStart = null;
+      didDrag = true;
+    };
+
+    containerEl.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      if (e.pointerType === 'mouse') activePointers.clear();
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (activePointers.size === 2) {
+        startPinch();
+      } else if (activePointers.size === 1) {
+        pinchStart = null;
+        panStart = { ptrId: e.pointerId, clientX: e.clientX, clientY: e.clientY, panX: pan.x, panY: pan.y };
+        didDrag = false;
+      }
+    });
+
+    window.addEventListener('pointermove', (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+      if (activePointers.size === 2 && pinchStart) {
+        const [p1, p2] = [...activePointers.values()];
+        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        const newMidVb = screenToVb((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
+        applyZoomFrom(
+          pinchStart.zoom * (dist / pinchStart.dist),
+          newMidVb,
+          pinchStart.zoom,
+          pinchStart.panX,
+          pinchStart.panY,
+          { x: pinchStart.midVbX, y: pinchStart.midVbY }
+        );
+        return;
+      }
+
+      if (activePointers.size === 1 && panStart && panStart.ptrId === e.pointerId) {
+        const dx = e.clientX - panStart.clientX;
+        const dy = e.clientY - panStart.clientY;
+        if (Math.hypot(dx, dy) > 6) didDrag = true;
+        if (didDrag) {
+          const { pxToVb } = screenToVb(e.clientX, e.clientY);
+          pan = clampPan(containerEl, svgEl, panStart.panX + dx * pxToVb, panStart.panY + dy * pxToVb, zoom);
+          applyTransform();
+        }
+      }
+    });
+
+    const endPtr = (e) => {
+      if (!activePointers.has(e.pointerId)) return;
+      activePointers.delete(e.pointerId);
+      if (activePointers.size === 1) {
+        const [remainId, pos] = [...activePointers.entries()][0];
+        pinchStart = null;
+        panStart = { ptrId: remainId, clientX: pos.x, clientY: pos.y, panX: pan.x, panY: pan.y };
+      } else if (activePointers.size === 0) {
+        pinchStart = null;
+        panStart = null;
+        setTimeout(() => { didDrag = false; }, 30);
+      }
+    };
+    window.addEventListener('pointerup', endPtr);
+    window.addEventListener('pointercancel', endPtr);
+
+    containerEl.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const midVb = screenToVb(e.clientX, e.clientY);
+      const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
+      applyZoomFrom(zoom * factor, midVb, zoom, pan.x, pan.y);
+    }, { passive: false });
+
+    svgEl.onclick = (e) => {
+      if (didDrag || !context) return;
+      const poly = e.target.closest('[data-cell-x]');
+      if (!poly) return;
+      const x = parseInt(poly.dataset.cellX, 10);
+      const y = parseInt(poly.dataset.cellY, 10);
+      onCellClick(context.viewGarden.id, context.evalData, x, y);
+    };
+  };
+
+  return { render, alignActiveViewBox, resetView, bind };
 }
 
 // ============================================================================
@@ -1000,28 +1388,26 @@ function formatEssayTime(ts) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-function renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact = false }) {
-  const isDemo = e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome' || Boolean(e.isDemo);
-  const isMine = !isDemo && e.authorUid === uid;
+function renderEssayCardHtml(e, idx, { uid, user, todayKey, garden, compact = false }) {
+  const { isDemo, isAuthor, hideReactions, authorDisplayName } = resolveEssayMeta(e, uid, garden);
   const isToday = e.dayKey === todayKey;
   const isYesterday = e.dayKey === addDays(todayKey, -1);
   const subLabel = compact ? formatEssayTime(e.createdAt) : (isToday ? '今天' : (isYesterday ? '昨天' : e.dayKey.slice(5)));
-  const resolvedAuthor = isDemo ? (e.authorName || '美地嚮導') : ((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人');
-  const authorLabel = isMine ? '我' : resolvedAuthor;
-  const avatarChar = isDemo ? '美' : (Array.from((isMine ? user.displayName : resolvedAuthor) || authorLabel)[0] || '我');
-  const avatarCls = isDemo
+  const authorLabel = isAuthor ? '我' : authorDisplayName;
+  const avatarChar = isDemo ? '美' : (Array.from((isAuthor ? user.displayName : authorDisplayName) || authorLabel)[0] || '我');
+  const avatarCls = isDemo || isAuthor
     ? 'bg-[#2b5e4e] text-[#fffdf8]'
-    : (isMine ? 'bg-[#2b5e4e] text-[#fffdf8]' : 'bg-[#df8a2b]/20 text-[#9a5210] border border-[#df8a2b]/35');
+    : 'bg-[#df8a2b]/20 text-[#9a5210] border border-[#df8a2b]/35';
   const { myReaction } = getEssayReactionSummary(e, uid);
-  const footerRight = (isGroup && e.private)
+  const footerRight = hideReactions
     ? `<span class="text-[#786b5e]/80 shrink-0" title="私密隨筆">${icon('lock', 'w-3.5 h-3.5')}</span>`
-    : `<button type="button" data-react-btn="${e.id}" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center gap-0.5 shrink-0 py-0.5 -my-0.5 rounded-full transition">${renderReactionBtnInner(e, uid)}</button>`;
+    : `<button type="button" data-react-btn="${e.id}" data-tray-align="right" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center gap-0.5 shrink-0 py-0.5 -my-0.5 rounded-full transition">${renderReactionBtnInner(e, uid)}</button>`;
   const card = resolveEssayCardStyle(e);
   const sizeCls = compact
     ? 'w-[42%] min-w-[150px] h-[clamp(152px,23vh,198px)] pt-11 pb-2.5 px-[17px]'
     : 'w-[45%] h-[clamp(196px,31vh,264px)] card-float pt-12 pb-3.5 px-[17px]';
   const textCls = compact
-    ? 'memo-text-compact text-xs text-[#382e26] leading-snug whitespace-pre-wrap break-words text-justify [text-align-last:left]'
+    ? 'memo-text text-xs text-[#382e26] leading-snug whitespace-pre-wrap break-words text-justify [text-align-last:left]'
     : 'memo-text text-[13px] text-[#382e26] leading-[1.48] whitespace-pre-wrap break-words text-justify [text-align-last:left]';
   const floatStyle = compact ? '' : `animation-delay:${(idx % 3) * 1.1}s`;
 
@@ -1044,7 +1430,7 @@ function updateEssayCardLineClamps(containerEl = document) {
 
   cards.forEach(cardEl => {
     const wrapEl = cardEl.querySelector('.essay-text-wrap');
-    const textEl = cardEl.querySelector('.memo-text, .memo-text-compact');
+    const textEl = cardEl.querySelector('.memo-text');
     if (!wrapEl || !textEl) return;
 
     const textArea_h = wrapEl.clientHeight || wrapEl.getBoundingClientRect().height;
@@ -1066,7 +1452,7 @@ function updateEssayCardLineClamps(containerEl = document) {
   });
 }
 
-function bindEssayCards(containerEl, essayById) {
+function bindEssayCards(containerEl) {
   updateEssayCardLineClamps(containerEl);
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => updateEssayCardLineClamps(containerEl));
@@ -1077,51 +1463,12 @@ function bindEssayCards(containerEl, essayById) {
     });
     containerEl.__clampObserver.observe(containerEl);
   }
-
-  containerEl.querySelectorAll('.essay-card').forEach(cardEl => {
-    const target = essayById.get(cardEl.dataset.essayId);
-    const reactBtn = cardEl.querySelector('[data-react-btn]');
-    if (reactBtn && target) bindReactionTrigger(reactBtn, target);
-
-    const openCardModal = () => {
-      if (!target) return;
-      closeReactionTray();
-      ui.activeModal = 'read_essay';
-      ui.modalData = target;
-      renderModal();
-    };
-    cardEl.onclick = (ev) => {
-      if (
-        ui.carouselDidDrag ||
-        (Date.now() < ui.suppressCardClickUntil && ui.suppressCardId === cardEl.dataset.essayId) ||
-        ev.target.closest('[data-react-btn]')
-      ) return;
-      openCardModal();
-    };
-    cardEl.onkeydown = (ev) => {
-      if (ev.target !== cardEl) return;
-      if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault();
-        openCardModal();
-      }
-    };
-  });
 }
 
-function renderApp() {
+function renderScreen() {
   const uid = store.state.currentUserId;
   const user = store.state.users[uid];
   const activeGarden = store.currentGarden();
-
-  // 檢查換月與團體投票
-  const monthTransition = store.checkMonthTransition();
-  if (monthTransition?.needsPersonalThemePick && ui.activeModal !== 'theme_picker') {
-    ui.activeModal = 'theme_picker';
-    ui.modalData = { month: monthTransition.month, mode: 'new_month' };
-  } else if (monthTransition?.autoResolvedGroupTheme) {
-    const tName = catalog.themes[monthTransition.autoResolvedGroupTheme]?.name;
-    showToast(`新月份開始！團體區域已定案為「${tName}」`);
-  }
 
   // 取得依時間排序的所有月份區域清單，供左右箭頭切換
   const orderedRegions = store.getOrderedRegionsList();
@@ -1144,11 +1491,10 @@ function renderApp() {
   const stepMonth = (delta) => {
     const target = orderedRegions[curIdx + delta];
     if (!target) return;
-    closeReactionTray();
     ui.viewingGardenId = target.gardenId;
     ui.viewingRegionId = target.region.id;
     ui.placingMode = null;
-    resetGardenView();
+    islandStage?.resetView();
     renderApp();
   };
 
@@ -1190,12 +1536,7 @@ function renderApp() {
   document.getElementById('screen-essays').classList.toggle('hidden', ui.screen !== 'essays');
   document.getElementById('screen-garden').classList.toggle('hidden', ui.screen !== 'garden');
 
-  const appContainer = document.getElementById('app-container');
-  if (appContainer) appContainer.setAttribute('data-screen', ui.screen);
-  document.body.setAttribute('data-screen', ui.screen);
-  if (bgManager && typeof bgManager.setScreen === 'function') {
-    bgManager.setScreen(ui.screen);
-  }
+  bgManager.setScreen(ui.screen);
 
   if (ui.screen === 'home') {
     const seedsGiven = gardenDay.seedsGiven || 0;
@@ -1223,7 +1564,8 @@ function renderApp() {
     const carousel = document.getElementById('essay-carousel');
     const allEssays = store.getCarouselEssays();
     const homeEssays = allEssays.slice(0, config.homeEssayLimit);
-    const essayById = new Map(homeEssays.map(e => [e.id, e]));
+    renderedEssayMap.clear();
+    homeEssays.forEach(e => renderedEssayMap.set(e.id, e));
 
     let cardsHtml = '';
     if (allEssays.length === 0) {
@@ -1234,7 +1576,7 @@ function renderApp() {
           <span class="text-xs text-[#786b5e]">點擊上方輸入框寫下今天的第一篇隨筆吧</span>
         </button>`;
     } else {
-      cardsHtml = homeEssays.map((e, idx) => renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact: false })).join('');
+      cardsHtml = homeEssays.map((e, idx) => renderEssayCardHtml(e, idx, { uid, user, todayKey, garden: activeGarden, compact: false })).join('');
       if (allEssays.length > config.homeEssayLimit) {
         cardsHtml += `
           <button type="button" id="btn-all-essays-tail" data-all-essays-tail="1" class="shrink-0 w-[34%] h-[clamp(196px,31vh,264px)] sky-card rounded-2xl border-dashed border-[#2b5e4e]/45 px-2.5 flex flex-col items-center justify-center gap-2 text-center hover:bg-[#fffdf8]/95 cursor-pointer">
@@ -1255,7 +1597,7 @@ function renderApp() {
         openAllEssaysScreen();
       };
     }
-    bindEssayCards(carousel, essayById);
+    bindEssayCards(carousel);
 
     // 頂部精簡狀態膠囊（自製 SVG 圖標）
     const streakEl = document.getElementById('home-stat-streak');
@@ -1285,7 +1627,7 @@ function renderApp() {
       <span>・</span>
       <span>成長中 ${growingCount}</span>`;
 
-    renderActiveIslandSvg(viewGarden, evalData);
+    islandStage.render(viewGarden, evalData);
   } else if (ui.screen === 'essays') {
     const animMode = ui.essaysAnim;
     ui.essaysAnim = null;
@@ -1304,9 +1646,7 @@ function renderApp() {
     knownMonths.sort();
     let minMonth = knownMonths.length > 0 && knownMonths[0] < todayMonth ? knownMonths[0] : todayMonth;
     if (store.isCloud && store.state.hasMoreEssayHistory) {
-      const [my, mm] = minMonth.split('-').map(Number);
-      const prevM = mm === 1 ? `${my - 1}-12` : `${my}-${String(mm - 1).padStart(2, '0')}`;
-      if (prevM < minMonth) minMonth = prevM;
+      minMonth = addDays(`${minMonth}-01`, -1).slice(0, 7);
     }
     const maxMonth = knownMonths.length > 0 && knownMonths[knownMonths.length - 1] > todayMonth ? knownMonths[knownMonths.length - 1] : todayMonth;
     const months = [];
@@ -1324,7 +1664,6 @@ function renderApp() {
 
     if (
       store.isCloud &&
-      typeof store.ensureEssayMonthLoaded === 'function' &&
       !store.state.loadedEssayMonths?.[activeMonth] &&
       !loadingEssayMonths.has(activeMonth)
     ) {
@@ -1332,7 +1671,10 @@ function renderApp() {
       store.ensureEssayMonthLoaded(activeMonth)
         .then(() => {
           loadingEssayMonths.delete(activeMonth);
-          if (ui.screen === 'essays') renderApp();
+          if (ui.screen === 'essays') {
+            if (INTERACTIVE_MODALS.has(ui.activeModal)) renderScreen();
+            else renderApp();
+          }
         })
         .catch((err) => {
           loadingEssayMonths.delete(activeMonth);
@@ -1351,7 +1693,6 @@ function renderApp() {
     const stepEssayMonth = (delta) => {
       const target = months[monthIdx + delta];
       if (!target) return;
-      closeReactionTray();
       clearEssaysTransition();
       ui.viewingEssayMonth = target;
       ui.essaysAnim = 'month';
@@ -1362,7 +1703,8 @@ function renderApp() {
     nextBtn.onclick = () => stepEssayMonth(1);
 
     const monthEssays = allEssays.filter(e => e.dayKey.slice(0, 7) === activeMonth);
-    const essayById = new Map(monthEssays.map(e => [e.id, e]));
+    renderedEssayMap.clear();
+    monthEssays.forEach(e => renderedEssayMap.set(e.id, e));
     const byDay = new Map();
     for (const e of monthEssays) {
       if (!byDay.has(e.dayKey)) byDay.set(e.dayKey, []);
@@ -1393,11 +1735,11 @@ function renderApp() {
               <span class="font-semibold text-[#5c5046]">${items.length} 則</span>
             </div>
             <div class="essay-scroll-row essay-day-row flex items-stretch gap-2.5 overflow-x-auto no-scrollbar -mx-4 px-4 py-1 cursor-grab">
-              ${items.map((e, idx) => renderEssayCardHtml(e, idx, { uid, user, todayKey, isGroup, compact: true })).join('')}
+              ${items.map((e, idx) => renderEssayCardHtml(e, idx, { uid, user, todayKey, garden: activeGarden, compact: true })).join('')}
             </div>
           </section>`;
       }).join('');
-      bindEssayCards(listEl, essayById);
+      bindEssayCards(listEl);
     }
     listEl.scrollTop = prevScroll;
   } else {
@@ -1440,9 +1782,16 @@ function renderApp() {
 
     renderGardenBgSelectorBar();
 
-    renderActiveIslandSvg(viewGarden, evalData);
+    islandStage.render(viewGarden, evalData);
   }
 
+  if (reactionState.tray && !reactionState.tray.btnEl.isConnected) {
+    closeReactionTray();
+  }
+}
+
+function renderApp() {
+  renderScreen();
   renderModal();
 }
 
@@ -1454,7 +1803,7 @@ function renderGardenBgSelectorBar() {
     return;
   }
 
-  const unlocked = store.getUnlockedBgThemes ? store.getUnlockedBgThemes() : ['morning'];
+  const unlocked = store.getUnlockedBgThemes();
   if (!unlocked || unlocked.length <= 1) {
     bar.classList.add('hidden');
     bar.innerHTML = '';
@@ -1462,11 +1811,11 @@ function renderGardenBgSelectorBar() {
   }
 
   bar.classList.remove('hidden');
-  const catalog = bgManager.getThemeCatalog();
-  const currentActive = store.getActiveBgTheme ? store.getActiveBgTheme() : 'morning';
+  const bgCatalog = bgManager.getThemeCatalog();
+  const currentActive = store.getActiveBgTheme();
 
   bar.innerHTML = unlocked.map(tid => {
-    const item = catalog.find(t => t.id === tid);
+    const item = bgCatalog.find(t => t.id === tid);
     if (!item) return '';
     const isActive = item.id === currentActive;
     return `
@@ -1487,36 +1836,9 @@ function renderGardenBgSelectorBar() {
 
   bar.querySelectorAll('[data-switch-bg]').forEach(btn => {
     btn.onclick = () => {
-      const tid = btn.dataset.switchBg;
-      if (store.setBgTheme) store.setBgTheme(tid);
-      else bgManager.setTheme(tid);
+      store.setBgTheme(btn.dataset.switchBg);
       renderGardenBgSelectorBar();
     };
-  });
-}
-
-function renderActiveIslandSvg(viewGarden, evalData) {
-  lastIslandContext = { viewGarden, evalData };
-  if (ui.screen === 'home') {
-    const homeSvg = document.getElementById('home-island-svg');
-    alignHomeIslandViewBox(evalData.region.size);
-    homeSvg.innerHTML = renderIsometricIsland(evalData, { interactive: false, placingMode: false, pan: { x: 0, y: 0 }, zoom: 1 });
-    requestAnimationFrame(() => {
-      if (ui.screen === 'home' && lastIslandContext) {
-        alignHomeIslandViewBox(lastIslandContext.evalData.region.size);
-      }
-    });
-    return;
-  }
-  const fullVp = document.getElementById('full-garden-viewport');
-  const fullSvg = document.getElementById('full-island-svg');
-  alignFullIslandViewBox(evalData.region.size);
-  ui.pan = clampIslandPan(fullVp, fullSvg, ui.pan.x, ui.pan.y, ui.zoom, { topPadPx: ISLAND_FULL_TOP_PAD_PX });
-  fullSvg.innerHTML = renderIsometricIsland(evalData, { interactive: true, placingMode: Boolean(ui.placingMode), pan: ui.pan, zoom: ui.zoom });
-  requestAnimationFrame(() => {
-    if (ui.screen === 'garden' && lastIslandContext) {
-      alignFullIslandViewBox(lastIslandContext.evalData.region.size);
-    }
   });
 }
 
@@ -1636,42 +1958,29 @@ function renderModal() {
     const errEl = document.getElementById('auth-error-msg');
     const submitBtn = document.getElementById('btn-auth-submit');
 
-    formEl.onsubmit = async (ev) => {
+    formEl.onsubmit = (ev) => {
       ev.preventDefault();
-      const uname = userInp.value.trim();
-      const pw = passInp.value;
       if (errEl) {
         errEl.classList.add('hidden');
         errEl.textContent = '';
       }
-      if (pendingWriteLock || submitBtn.disabled) return;
-      pendingWriteLock = true;
-      const origHtml = submitBtn.innerHTML;
-      submitBtn.disabled = true;
-      submitBtn.textContent = '連線進入中...';
-      try {
+      runLockedAction(submitBtn, '連線進入中...', async () => {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Taipei';
-        const res = await store.authenticate(uname, pw, tz);
+        const res = await store.authenticate(userInp.value.trim(), passInp.value, tz);
         ui.activeModal = null;
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
+        resetViewingRegion();
         ui.viewingEssayMonth = null;
         showToast(res.isNewUser ? `歡迎來到隨筆花園，${store.currentUser().displayName}！` : `歡迎回來，${store.currentUser().displayName}！`);
+        syncMonthTransition();
         renderApp();
-      } catch (err) {
+      }, (err) => {
         const msg = err?.message || '帳號或密碼驗證失敗';
         if (errEl) {
           errEl.textContent = msg;
           errEl.classList.remove('hidden');
         }
         showToast(msg);
-      } finally {
-        pendingWriteLock = false;
-        if (submitBtn && submitBtn.isConnected) {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = origHtml;
-        }
-      }
+      });
     };
     return;
   }
@@ -1680,8 +1989,8 @@ function renderModal() {
   if (ui.activeModal === 'editor') {
     const isGroup = garden.type === 'group';
     const makeUp = store.canMakeUpYesterday();
-    let selectedCardId = getDefaultCardStyle(user);
-    const initCard = CARD_STYLE_MAP[selectedCardId];
+    let selectedCardId = store.getPreferredCardStyle();
+    const initCard = CARD_STYLE_MAP[selectedCardId] || CARD_STYLES[0];
     box.innerHTML = `
       <div class="space-y-3 max-h-[85vh] overflow-y-auto">
         <div class="flex items-center justify-between">
@@ -1695,26 +2004,16 @@ function renderModal() {
           </div>` : ''}
         ${renderCardPickerHtml(selectedCardId)}
         <div id="editor-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-[17px]" style="${memoStyleAttr(initCard)}">
-          <textarea id="essay-input" rows="4" placeholder="寫下今天的隨筆想法（至少 10 字即可獲得種子，字數越多稀有度越高）..." class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text text-justify [text-align-last:left]"></textarea>
+          <textarea id="essay-input" rows="4" placeholder="寫下今天的隨筆想法（至少 ${config.minWords} 字即可獲得種子，字數越多稀有度越高）..." class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text text-justify [text-align-last:left]"></textarea>
         </div>
 
         <div class="bg-[#f6f0e4] rounded-2xl p-3 space-y-2 text-xs">
           <div class="flex items-center justify-between">
-            <span id="live-word-count" class="font-bold text-[#1d4237]">目前字數：0 字（需滿 10 字）</span>
+            <span id="live-word-count" class="font-bold text-[#1d4237]"></span>
             <span class="text-[#786b5e]">保底累積：${user.pity} / ${config.pityThreshold}</span>
           </div>
-          <div class="w-full h-2.5 rounded-full overflow-hidden flex bg-[#e5dec9]" id="prob-bar">
-            <div class="bg-stone-400 h-full" style="width:80%"></div>
-            <div class="bg-sky-500 h-full" style="width:17%"></div>
-            <div class="bg-purple-500 h-full" style="width:3%"></div>
-            <div class="bg-amber-400 h-full" style="width:0%"></div>
-          </div>
-          <div class="grid grid-cols-4 gap-1 text-center text-[#5c5046]" id="prob-labels">
-            <span>普通 80.0%</span>
-            <span class="text-sky-700">稀有 17.0%</span>
-            <span class="text-purple-700">史詩 3.0%</span>
-            <span class="text-amber-700">傳說 0.0%</span>
-          </div>
+          <div class="w-full h-2.5 rounded-full overflow-hidden flex bg-[#e5dec9]" id="prob-bar"></div>
+          <div class="grid grid-cols-4 gap-1 text-center text-[#5c5046]" id="prob-labels"></div>
         </div>
 
         <div class="flex items-center ${isGroup ? 'justify-between' : 'justify-end'} pt-1">
@@ -1729,11 +2028,11 @@ function renderModal() {
 
     bindCardPicker(box, document.getElementById('editor-memo-wrap'), selectedCardId, (id) => {
       selectedCardId = id;
-      savePreferredCardStyle(id);
+      store.setPreferredCardStyle(id);
     });
 
     const input = document.getElementById('essay-input');
-    input.addEventListener('input', () => {
+    const updateWordStats = () => {
       const w = countEssayWords(input.value);
       document.getElementById('live-word-count').textContent = w < config.minWords
         ? `目前字數：${w} 字（還差 ${config.minWords - w} 字）`
@@ -1749,7 +2048,9 @@ function renderModal() {
         <span class="text-sky-700 font-semibold">稀有 ${probs.rare.toFixed(1)}%</span>
         <span class="text-purple-700 font-semibold">史詩 ${probs.epic.toFixed(1)}%</span>
         <span class="text-amber-700 font-bold">傳說 ${probs.legendary.toFixed(1)}%</span>`;
-    });
+    };
+    input.addEventListener('input', updateWordStats);
+    updateWordStats();
 
     const makeUpBtn = document.getElementById('btn-editor-makeup');
     if (makeUpBtn) makeUpBtn.onclick = handleMakeUpClick;
@@ -1757,7 +2058,6 @@ function renderModal() {
     const submitBtn = document.getElementById('btn-submit-essay');
     submitBtn.onclick = () => {
       const priv = isGroup ? document.getElementById('essay-private').checked : true;
-      savePreferredCardStyle(selectedCardId);
       runLockedAction(submitBtn, '結算中...', async () => {
         const { result } = await store.submitEssay(input.value, priv, uid, selectedCardId);
         ui.activeModal = 'reward';
@@ -1765,7 +2065,6 @@ function renderModal() {
         renderApp();
       });
     };
-    bindCloseModal();
     return;
   }
 
@@ -1787,7 +2086,7 @@ function renderModal() {
           <div class="p-4 rounded-2xl border-2 ${rarityBadge.cls} space-y-2">
             ${r.isPity ? `<div class="text-xs font-bold text-purple-700">保底觸發！（第 11 顆必出史詩以上）</div>` : ''}
             <div class="w-28 h-28 mx-auto flex items-center justify-center">
-              ${renderPlantPreviewHTML(sp, { requiredDays: sp.requiredDays, evalState: { stage: 'grown', progress: sp.requiredDays, miss: 0, isPerfect: true, hadWilt: false } })}
+              ${renderPlantPreviewHTML(sp)}
             </div>
             <div class="inline-block px-2.5 py-0.5 rounded-full text-xs font-bold border ${rarityBadge.cls}">${rarityBadge.label}種子</div>
             <div class="text-lg font-extrabold text-[#1d4237]">${sp.name}</div>
@@ -1819,12 +2118,10 @@ function renderModal() {
     const plantNowBtn = document.getElementById('btn-reward-plant-now');
     if (plantNowBtn) {
       plantNowBtn.onclick = () => {
-        ui.activeModal = null;
-        ui.screen = 'garden';
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
-        ui.placingMode = { type: 'seed', id: r.seedSpeciesId, label: `正在種植「${sp.name}」：請點選花園上的空位光圈` };
-        renderApp();
+        startPlacingMode(
+          { type: 'seed', id: r.seedSpeciesId, label: `正在種植「${sp.name}」：請點選花園上的空位光圈` },
+          { resetView: true, screen: 'garden' }
+        );
       };
     }
     document.getElementById('btn-reward-bag').onclick = () => {
@@ -1837,19 +2134,13 @@ function renderModal() {
   // 3. 閱讀／編輯隨筆
   if (ui.activeModal === 'read_essay') {
     const e = ui.modalData;
-    const isDemo = e.id === DEMO_ESSAY_ID || e.id === 'essay_welcome' || Boolean(e.isDemo);
-    const isMine = (Boolean(e.authorUid) && e.authorUid === uid) || isDemo;
-    const isGroup = !isDemo && garden.type === 'group';
-    const showPrivateLock = isGroup && e.private;
+    const { isDemo, isAuthor, isGroup, hideReactions, authorDisplayName } = resolveEssayMeta(e, uid, garden);
     let selectedCardId = resolveEssayCardStyle(e).id;
     const initCard = CARD_STYLE_MAP[selectedCardId];
     const { myReaction } = getEssayReactionSummary(e, uid);
-    const modalReactBtnHtml = showPrivateLock
+    const modalReactBtnHtml = hideReactions
       ? ''
-      : `<button type="button" data-react-btn="${e.id}" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center justify-center gap-1 min-w-[52px] px-2.5 py-1 rounded-full bg-[#f6f0e4] border border-[#e5dec9] transition">${renderReactionBtnInner(e, uid)}</button>`;
-    const authorDisplayName = isDemo
-      ? '美地嚮導'
-      : ((typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(e.authorUid)) || e.authorName || '旅人');
+      : `<button type="button" data-react-btn="${e.id}" data-tray-align="left" data-active-reaction="${myReaction || ''}" aria-label="${escapeHtml(getReactionAriaLabel(e, uid))}" class="inline-flex items-center justify-center gap-1 min-w-[52px] px-2.5 py-1 rounded-full bg-[#f6f0e4] border border-[#e5dec9] transition">${renderReactionBtnInner(e, uid)}</button>`;
 
     box.innerHTML = `
       <div class="space-y-3 max-h-[85vh] overflow-y-auto no-scrollbar">
@@ -1868,7 +2159,7 @@ function renderModal() {
               <span class="text-xs text-[#786b5e] select-none">← 長按可以選擇不同回應</span>
             </div>
           </div>
-        ` : (isMine ? `
+        ` : (isAuthor ? `
           ${renderCardPickerHtml(selectedCardId)}
           <div id="edit-memo-wrap" class="memo-note w-full pt-[26%] pb-[11%] px-[17px]" style="${memoStyleAttr(initCard)}">
             <textarea id="edit-essay-text" rows="5" class="w-full bg-transparent text-sm text-[#382e26] leading-relaxed resize-none focus:outline-none select-text text-justify [text-align-last:left]">${escapeHtml(e.content)}</textarea>
@@ -1887,29 +2178,20 @@ function renderModal() {
           </div>
         ` : `
           <div class="memo-note w-full pt-[26%] pb-[12%] px-[17px] text-sm text-[#382e26]" style="${memoStyleAttr(initCard)}"><p class="whitespace-pre-wrap leading-relaxed select-text text-justify [text-align-last:left]">${escapeHtml(e.content)}</p></div>
-          ${!showPrivateLock ? `<div class="flex items-center justify-between text-xs text-[#5c5046] pt-1"><span class="select-none">給予心情反應（長按可選更多）</span>${modalReactBtnHtml}</div>` : ''}
+          ${!hideReactions ? `<div class="flex items-center justify-between text-xs text-[#5c5046] pt-1"><span class="select-none">給予心情反應（長按可選更多）</span>${modalReactBtnHtml}</div>` : ''}
         `)}
       </div>`;
-    const modalReactBtn = box.querySelector('[data-react-btn]');
-    if (modalReactBtn) bindReactionTrigger(modalReactBtn, e);
     if (isDemo) {
       bindCardPicker(box, document.getElementById('edit-memo-wrap'), selectedCardId, (id) => {
         selectedCardId = id;
-        saveDemoEssayCardStyle(id);
         e.cardStyle = id;
-        const homeCardEl = document.querySelector(`.essay-card[data-essay-id="${e.id}"]`);
-        if (homeCardEl) {
-          const c = CARD_STYLE_MAP[id];
-          if (c) {
-            homeCardEl.style.setProperty('--memo-bg', c.bg);
-            homeCardEl.style.setProperty('--memo-img', `url("./assets/card/${c.id}.png?v=${ASSET_VER}")`);
-          }
-        }
+        store.setEssayCardStyle(e.id, id);
+        renderScreen();
       });
-    } else if (isMine) {
+    } else if (isAuthor) {
       bindCardPicker(box, document.getElementById('edit-memo-wrap'), selectedCardId, (id) => {
         selectedCardId = id;
-        savePreferredCardStyle(id);
+        store.setPreferredCardStyle(id);
       });
       const editInput = document.getElementById('edit-essay-text');
       const wordCountEl = document.getElementById('edit-word-count');
@@ -1926,14 +2208,12 @@ function renderModal() {
         const priv = isGroup ? document.getElementById('edit-essay-priv').checked : Boolean(e.private);
         runLockedAction(saveBtn, '儲存中...', async () => {
           await store.updateEssayContent(e.id, txt, priv, selectedCardId, e.dayKey, e.authorUid);
-          savePreferredCardStyle(selectedCardId);
           ui.activeModal = null;
           showToast('已更新隨筆內容');
           renderApp();
         });
       };
     }
-    bindCloseModal();
     return;
   }
 
@@ -1943,10 +2223,7 @@ function renderModal() {
     const sp = store.speciesMap[plant.speciesId];
     const st = plant.evalState;
     const isMine = plant.plantedBy === uid;
-    const planterName =
-      (typeof store.getMemberDisplayName === 'function' && store.getMemberDisplayName(plant.plantedBy)) ||
-      store.state.gardens[gardenId]?.members?.[plant.plantedBy]?.displayName ||
-      '旅人';
+    const planterName = store.getMemberDisplayName(plant.plantedBy);
 
     const stageLabel = {
       growing: `成長中 Lv${st.level}（已累積 ${st.progress} / ${plant.requiredDays} 天）`,
@@ -2017,12 +2294,9 @@ function renderModal() {
     const mvBtn = document.getElementById('btn-plant-move');
     if (mvBtn) {
       mvBtn.onclick = () => {
-        ui.activeModal = null;
-        ui.placingMode = { type: 'move', kind: 'plant', id: plant.id, label: `正在移動「${sp.name}」：請點選目標空位光圈` };
-        renderApp();
+        startPlacingMode({ type: 'move', kind: 'plant', id: plant.id, label: `正在移動「${sp.name}」：請點選目標空位光圈` });
       };
     }
-    bindCloseModal();
     return;
   }
 
@@ -2052,9 +2326,7 @@ function renderModal() {
     const mv = document.getElementById('btn-decor-move');
     if (mv) {
       mv.onclick = () => {
-        ui.activeModal = null;
-        ui.placingMode = { type: 'move', kind: 'decor', id: decor.id, label: `正在移動「${item.name}」：請點選空位光圈` };
-        renderApp();
+        startPlacingMode({ type: 'move', kind: 'decor', id: decor.id, label: `正在移動「${item.name}」：請點選空位光圈` });
       };
     }
     const rm = document.getElementById('btn-decor-remove');
@@ -2068,7 +2340,6 @@ function renderModal() {
         });
       };
     }
-    bindCloseModal();
     return;
   }
 
@@ -2118,25 +2389,20 @@ function renderModal() {
         </div>
       </div>`;
 
-    box.querySelectorAll('[data-plant-seed]').forEach(b => {
-      b.onclick = () => {
-        runLockedAction(b, '種植中...', async () => {
-          await store.plantSeed(b.dataset.plantSeed, x, y, false);
-          ui.activeModal = null;
-          showToast('已種下種子！');
-          renderApp();
-        });
-      };
-    });
-    box.querySelectorAll('[data-plant-lim]').forEach(b => {
-      b.onclick = () => {
-        runLockedAction(b, '種植中...', async () => {
-          await store.plantSeed(b.dataset.plantLim, x, y, true);
-          ui.activeModal = null;
-          showToast('已種下里程碑限定植物！');
-          renderApp();
-        });
-      };
+    [
+      ['[data-plant-seed]', 'plantSeed', false, '已種下種子！'],
+      ['[data-plant-lim]', 'plantLim', true, '已種下里程碑限定植物！']
+    ].forEach(([sel, key, isLim, msg]) => {
+      box.querySelectorAll(sel).forEach(b => {
+        b.onclick = () => {
+          runLockedAction(b, '種植中...', async () => {
+            await store.plantSeed(b.dataset[key], x, y, isLim);
+            ui.activeModal = null;
+            showToast(msg);
+            renderApp();
+          });
+        };
+      });
     });
     box.querySelectorAll('[data-buy-decor]').forEach(b => {
       b.onclick = () => {
@@ -2148,7 +2414,6 @@ function renderModal() {
         });
       };
     });
-    bindCloseModal();
     return;
   }
 
@@ -2187,7 +2452,7 @@ function renderModal() {
               <div class="p-2.5 rounded-2xl bg-white border border-[#e5dec9] flex items-center justify-between gap-2">
                 <div class="flex items-center gap-2">
                   <div class="w-10 h-10 rounded-xl bg-[#f6f0e4] p-1 shrink-0">
-                    ${renderPlantPreviewHTML(sp, { requiredDays: sp.requiredDays, evalState: { stage: 'grown', progress: sp.requiredDays, miss: 0, isPerfect: true, hadWilt: false } })}
+                    ${renderPlantPreviewHTML(sp)}
                   </div>
                   <div>
                     <div class="font-bold text-[#1d4237]">${sp.name} x${cnt}</div>
@@ -2203,25 +2468,19 @@ function renderModal() {
         </div>
       </div>`;
 
-    box.querySelectorAll('[data-bag-plant]').forEach(b => {
-      b.onclick = () => {
-        const sp = store.speciesMap[b.dataset.bagPlant];
-        ui.activeModal = null;
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
-        ui.placingMode = { type: 'seed', id: sp.id, label: `正在種植「${sp.name}」：請點選花園上的空位光圈` };
-        renderApp();
-      };
-    });
-    box.querySelectorAll('[data-bag-plant-lim]').forEach(b => {
-      b.onclick = () => {
-        const sp = store.speciesMap[b.dataset.bagPlantLim];
-        ui.activeModal = null;
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
-        ui.placingMode = { type: 'limited', id: sp.id, label: `正在種植限定「${sp.name}」：請點選花園上的空位光圈` };
-        renderApp();
-      };
+    [
+      ['[data-bag-plant]', 'bagPlant', 'seed', '正在種植'],
+      ['[data-bag-plant-lim]', 'bagPlantLim', 'limited', '正在種植限定']
+    ].forEach(([sel, key, type, prefix]) => {
+      box.querySelectorAll(sel).forEach(b => {
+        b.onclick = () => {
+          const sp = store.speciesMap[b.dataset[key]];
+          startPlacingMode(
+            { type, id: sp.id, label: `${prefix}「${sp.name}」：請點選花園上的空位光圈` },
+            { resetView: true }
+          );
+        };
+      });
     });
     box.querySelectorAll('[data-bag-decomp]').forEach(b => {
       b.onclick = () => {
@@ -2232,7 +2491,6 @@ function renderModal() {
         });
       };
     });
-    bindCloseModal();
     return;
   }
 
@@ -2241,8 +2499,8 @@ function renderModal() {
     const activeReg = garden.regions[garden.activeRegionId];
     const expCost = config.expansionCosts[activeReg.expansions];
     const bgThemes = bgManager.getThemeCatalog();
-    const unlockedBgList = store.getUnlockedBgThemes ? store.getUnlockedBgThemes() : ['morning'];
-    const activeBg = store.getActiveBgTheme ? store.getActiveBgTheme() : 'morning';
+    const unlockedBgList = store.getUnlockedBgThemes();
+    const activeBg = store.getActiveBgTheme();
 
     box.innerHTML = `
       <div class="space-y-3 text-xs max-h-[75vh] overflow-y-auto">
@@ -2264,7 +2522,7 @@ function renderModal() {
         <div class="space-y-1.5">
           <div class="font-bold text-[#382e26] flex items-center justify-between">
             <span>天候與動態背景（為花園更換獨特天空景致）</span>
-            <span class="text-[11px] text-[#786b5e]">已解鎖 ${unlockedBgList.length}/5</span>
+            <span class="text-[11px] text-[#786b5e]">已解鎖 ${unlockedBgList.length}/${bgThemes.length}</span>
           </div>
           <div class="space-y-2">
             ${bgThemes.map(t => {
@@ -2338,19 +2596,16 @@ function renderModal() {
           showToast(`能量不足（需要 ${item.cost} 能量，目前僅有 ${user.energy} 能量）`);
           return;
         }
-        ui.activeModal = null;
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
-        ui.placingMode = { type: 'decor', id: item.id, label: `正在擺放「${item.name}」(${item.cost} 能量)：請點選空位光圈` };
-        renderApp();
+        startPlacingMode(
+          { type: 'decor', id: item.id, label: `正在擺放「${item.name}」(${item.cost} 能量)：請點選空位光圈` },
+          { resetView: true }
+        );
       };
     });
 
     box.querySelectorAll('[data-apply-bg]').forEach(b => {
       b.onclick = () => {
-        const tid = b.dataset.applyBg;
-        if (store.setBgTheme) store.setBgTheme(tid);
-        else bgManager.setTheme(tid);
+        store.setBgTheme(b.dataset.applyBg);
         showToast('已套用天候背景景致');
         renderApp();
       };
@@ -2371,7 +2626,6 @@ function renderModal() {
       };
     });
 
-    bindCloseModal();
     return;
   }
 
@@ -2391,7 +2645,7 @@ function renderModal() {
             return `
               <div class="p-2.5 rounded-2xl border ${unlocked ? 'border-[#e5dec9] bg-white' : 'border-[#e5dec9] bg-[#f6f0e4]/60 opacity-65'} text-center space-y-1">
                 <div class="w-16 h-16 mx-auto flex items-center justify-center ${unlocked ? '' : 'brightness-0 opacity-25'}">
-                  ${renderPlantPreviewHTML(sp, { requiredDays: sp.requiredDays, evalState: { stage: 'grown', progress: sp.requiredDays, miss: 0, isPerfect: true, hadWilt: false } })}
+                  ${renderPlantPreviewHTML(sp)}
                 </div>
                 <div class="font-bold text-[#1d4237] truncate">${unlocked ? sp.name : '？？？'}</div>
                 <div class="text-[#786b5e]">${sp.rarity.toUpperCase()}</div>
@@ -2399,7 +2653,6 @@ function renderModal() {
           }).join('')}
         </div>
       </div>`;
-    bindCloseModal();
     return;
   }
 
@@ -2434,11 +2687,10 @@ function renderModal() {
         ui.viewingGardenId = b.dataset.viewGid;
         ui.viewingRegionId = b.dataset.viewRid;
         ui.activeModal = null;
-        resetGardenView();
+        islandStage?.resetView();
         renderApp();
       };
     });
-    bindCloseModal();
     return;
   }
 
@@ -2460,9 +2712,7 @@ function renderModal() {
             <div class="font-bold text-[#1d4237]">建立新的多人花園</div>
             <input id="inp-group-name" type="text" placeholder="輸入小圈子名稱（例：晨光共筆團）" class="w-full rounded-xl border border-[#e5dec9] bg-white p-2 text-xs"/>
             <select id="sel-group-theme" class="w-full rounded-xl border border-[#e5dec9] bg-white p-2 text-xs">
-              <option value="flowerbed">春櫻花圃</option>
-              <option value="forest">迷霧森林</option>
-              <option value="oasis">沙漠綠洲</option>
+              ${Object.values(catalog.themes).map(t => `<option value="${t.id}">${t.name}</option>`).join('')}
             </select>
             <button id="btn-create-group" class="w-full py-2.5 rounded-xl bg-[#2b5e4e] text-[#fffdf8] font-bold">封存個人區並開團</button>
           </div>
@@ -2482,8 +2732,8 @@ function renderModal() {
         const th = document.getElementById('sel-group-theme').value;
         runLockedAction(createGrpBtn, '開團中...', async () => {
           const { inviteCode } = await store.createGroupGarden(name, th);
-          ui.viewingGardenId = null;
-          ui.viewingRegionId = null;
+          resetViewingRegion();
+          syncMonthTransition();
           showToast(`已建立多人花園！邀請碼：${inviteCode}`);
           renderApp();
         });
@@ -2493,8 +2743,8 @@ function renderModal() {
         const code = document.getElementById('inp-invite-code').value;
         runLockedAction(joinGrpBtn, '加入中...', async () => {
           await store.joinGroupByCode(code);
-          ui.viewingGardenId = null;
-          ui.viewingRegionId = null;
+          resetViewingRegion();
+          syncMonthTransition();
           showToast('成功加入多人花園！');
           renderApp();
         });
@@ -2556,9 +2806,7 @@ function renderModal() {
             <div class="text-[#786b5e]">退出團體時，會在相簿保留當下共用區域的唯讀快照，並選擇新的個人區域主題：</div>
             <div class="flex gap-2">
               <select id="sel-leave-theme" class="flex-1 rounded-xl border border-[#e5dec9] bg-white p-2">
-                <option value="flowerbed">新個人區：春櫻花圃</option>
-                <option value="forest">新個人區：迷霧森林</option>
-                <option value="oasis">新個人區：沙漠綠洲</option>
+                ${Object.values(catalog.themes).map(t => `<option value="${t.id}">新個人區：${t.name}</option>`).join('')}
               </select>
               <button id="btn-leave-group" class="px-3.5 py-2 rounded-xl bg-rose-100 text-rose-800 font-bold">退出團體</button>
             </div>
@@ -2589,15 +2837,13 @@ function renderModal() {
         const newTh = document.getElementById('sel-leave-theme').value;
         runLockedAction(leaveBtn, '退出中...', async () => {
           await store.leaveGroupGarden(newTh);
-          ui.viewingGardenId = null;
-          ui.viewingRegionId = null;
+          resetViewingRegion();
           ui.activeModal = null;
           showToast('已保存團體快照至相簿，並切換回新個人花園');
           renderApp();
         });
       };
     }
-    bindCloseModal();
     return;
   }
 
@@ -2624,8 +2870,7 @@ function renderModal() {
       b.onclick = () => {
         runLockedAction(b, '建立中...', async () => {
           await store.startNewMonthRegion(b.dataset.pickMonthTheme, month);
-          ui.viewingGardenId = null;
-          ui.viewingRegionId = null;
+          resetViewingRegion();
           ui.activeModal = null;
           showToast(`已建立 ${month} 主題區域！`);
           renderApp();
@@ -2711,16 +2956,19 @@ function renderModal() {
       document.getElementById('btn-sim-nextday').onclick = () => {
         const nextKey = store.advanceSimulationDays(1);
         showToast(`已進入下一天（${nextKey}）`);
+        syncMonthTransition();
         renderApp();
       };
       document.getElementById('btn-sim-skip2').onclick = () => {
         const nextKey = store.advanceSimulationDays(2);
         showToast(`已快轉 2 天（${nextKey}）`);
+        syncMonthTransition();
         renderApp();
       };
       document.getElementById('btn-sim-month-end').onclick = () => {
         const nextKey = store.advanceToMonthEnd();
         showToast(`已跳至本月最後一天（${nextKey}）`);
+        syncMonthTransition();
         renderApp();
       };
       document.getElementById('btn-sim-add-energy').onclick = () => {
@@ -2729,12 +2977,11 @@ function renderModal() {
         renderApp();
       };
       document.getElementById('btn-reset-all').onclick = () => {
-        localStorage.removeItem(CARD_STYLE_STORAGE_KEY);
         store.resetAllData();
-        ui.viewingGardenId = null;
-        ui.viewingRegionId = null;
+        resetViewingRegion();
         ui.viewingEssayMonth = null;
         ui.essaysAnim = null;
+        syncMonthTransition();
         showToast('已重置為初始示範狀態');
         goHome();
       };
@@ -2743,8 +2990,7 @@ function renderModal() {
       logoutBtn.onclick = () => {
         runLockedAction(logoutBtn, '登出中...', async () => {
           await store.logout();
-          ui.viewingGardenId = null;
-          ui.viewingRegionId = null;
+          resetViewingRegion();
           ui.viewingEssayMonth = null;
           ui.activeModal = 'auth';
           showToast('已登出帳號');
@@ -2752,17 +2998,6 @@ function renderModal() {
         });
       };
     }
-    bindCloseModal();
-  }
-}
-
-function bindCloseModal() {
-  const btn = document.getElementById('modal-close');
-  if (btn) {
-    btn.onclick = () => {
-      ui.activeModal = null;
-      renderModal();
-    };
   }
 }
 
@@ -2784,18 +3019,12 @@ function resolveRunMode(cloudConfig) {
   if (urlMode === 'local') return 'local';
   if (urlMode === 'cloud') return 'cloud';
 
-  // 若 localStorage 預置了純本機 GardenStore 狀態（user_me 且無雲端 session），自動以 local 模式載入以維持既有 L0 契約
-  try {
-    const rawState = localStorage.getItem('essay_garden_state_v4');
-    const hasSession = Boolean(localStorage.getItem(SESSION_STORAGE_KEY));
-    if (rawState && !hasSession) {
-      const parsed = JSON.parse(rawState);
-      if (parsed && parsed.currentUserId === 'user_me' && !parsed.cloudCacheVersion) {
-        return 'local';
-      }
-    }
-  } catch (_err) {
-    // ignore
+  // 若未帶 ?mode= 且尚無雲端快取或登入憑證，但本機 GardenStore 狀態鍵已預置（test_verification.py L423），維持本機模式
+  const hasCloudMarker = Boolean(
+    localStorage.getItem(SESSION_STORAGE_KEY) || localStorage.getItem(CLOUD_STATE_STORAGE_KEY)
+  );
+  if (!hasCloudMarker && localStorage.getItem('essay_garden_state_v4')) {
+    return 'local';
   }
 
   if (cloudConfig && cloudConfig.mode === 'cloud' && cloudConfig.gasWebAppUrl) {
@@ -2835,9 +3064,16 @@ async function boot() {
     store = new GardenStore(config, catalog);
   }
 
+  islandStage = createIslandStage({
+    getScreen: () => ui.screen,
+    isPlacingMode: () => Boolean(ui.placingMode),
+    onCellClick: handleGardenCellClick
+  });
+  islandStage.bind();
+
   const enterFullGarden = () => {
     clearEssaysTransition();
-    resetGardenView();
+    islandStage.resetView();
     ui.screen = 'garden';
     renderApp();
   };
@@ -2857,121 +3093,8 @@ async function boot() {
   document.addEventListener('gesturestart', preventSafariGesture, { passive: false });
   document.addEventListener('gesturechange', preventSafariGesture, { passive: false });
 
-  // 綁定花園島嶼的拖移與雙指縮放檢視（支援雙指捏合只放大花園島，並依土地大小與 zoom 調整拖移邊界）
-  const bindIslandViewport = (containerEl, svgEl, { allowZoom = false, topPadPx = ISLAND_FULL_TOP_PAD_PX } = {}) => {
-    const activePointers = new Map();
-    let panStart = null;
-    let pinchStart = null;
-
-    const applyTransform = () => {
-      const g = svgEl.querySelector('.island-pan-layer');
-      if (g) g.setAttribute('transform', getIslandTransform(ui.pan, ui.zoom));
-    };
-
-    const clampPan = (px, py, z) => clampIslandPan(containerEl, svgEl, px, py, z, { topPadPx });
-
-    const applyZoomFrom = (targetZoom, anchorVb, origZoom, origPanX, origPanY, origVb = anchorVb) => {
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom));
-      const ratio = newZoom / origZoom;
-      ui.zoom = newZoom;
-      ui.pan = clampPan(
-        anchorVb.x - (origVb.x - origPanX) * ratio,
-        anchorVb.y - (origVb.y - origPanY) * ratio,
-        newZoom
-      );
-      applyTransform();
-    };
-
-    const screenToVb = (clientX, clientY) => {
-      const rect = svgEl.getBoundingClientRect();
-      const vb = svgEl.viewBox.baseVal;
-      const scale = Math.min(rect.width / vb.width, rect.height / vb.height) || 1;
-      return {
-        x: vb.x + vb.width / 2 + (clientX - (rect.left + rect.width / 2)) / scale,
-        y: vb.y + vb.height / 2 + (clientY - (rect.top + rect.height / 2)) / scale,
-        pxToVb: 1 / scale
-      };
-    };
-
-    const startPinch = () => {
-      const [p1, p2] = [...activePointers.values()];
-      const dist = Math.max(10, Math.hypot(p2.x - p1.x, p2.y - p1.y));
-      const midVb = screenToVb((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
-      pinchStart = { dist, midVbX: midVb.x, midVbY: midVb.y, zoom: ui.zoom, panX: ui.pan.x, panY: ui.pan.y };
-      panStart = null;
-      ui.didDrag = true;
-    };
-
-    containerEl.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) return;
-      if (e.pointerType === 'mouse') activePointers.clear();
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (allowZoom && activePointers.size === 2) {
-        startPinch();
-      } else if (activePointers.size === 1) {
-        pinchStart = null;
-        panStart = { ptrId: e.pointerId, clientX: e.clientX, clientY: e.clientY, panX: ui.pan.x, panY: ui.pan.y };
-        ui.didDrag = false;
-      }
-    });
-
-    window.addEventListener('pointermove', (e) => {
-      if (!activePointers.has(e.pointerId)) return;
-      activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-
-      if (allowZoom && activePointers.size === 2 && pinchStart) {
-        const [p1, p2] = [...activePointers.values()];
-        const dist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        const newMidVb = screenToVb((p1.x + p2.x) / 2, (p1.y + p2.y) / 2);
-        applyZoomFrom(pinchStart.zoom * (dist / pinchStart.dist), newMidVb, pinchStart.zoom, pinchStart.panX, pinchStart.panY, { x: pinchStart.midVbX, y: pinchStart.midVbY });
-        return;
-      }
-
-      if (activePointers.size === 1 && panStart && panStart.ptrId === e.pointerId) {
-        const dx = e.clientX - panStart.clientX;
-        const dy = e.clientY - panStart.clientY;
-        if (Math.hypot(dx, dy) > 6) ui.didDrag = true;
-        if (ui.didDrag) {
-          const { pxToVb } = screenToVb(e.clientX, e.clientY);
-          ui.pan = clampPan(panStart.panX + dx * pxToVb, panStart.panY + dy * pxToVb, ui.zoom);
-          applyTransform();
-        }
-      }
-    });
-
-    const endPtr = (e) => {
-      if (!activePointers.has(e.pointerId)) return;
-      activePointers.delete(e.pointerId);
-      if (activePointers.size === 1) {
-        const [remainId, pos] = [...activePointers.entries()][0];
-        pinchStart = null;
-        panStart = { ptrId: remainId, clientX: pos.x, clientY: pos.y, panX: ui.pan.x, panY: ui.pan.y };
-      } else if (activePointers.size === 0) {
-        pinchStart = null;
-        panStart = null;
-        setTimeout(() => { ui.didDrag = false; }, 30);
-      }
-    };
-    window.addEventListener('pointerup', endPtr);
-    window.addEventListener('pointercancel', endPtr);
-
-    if (allowZoom) {
-      containerEl.addEventListener('wheel', (e) => {
-        e.preventDefault();
-        const midVb = screenToVb(e.clientX, e.clientY);
-        const factor = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
-        applyZoomFrom(ui.zoom * factor, midVb, ui.zoom, ui.pan.x, ui.pan.y);
-      }, { passive: false });
-    }
-  };
-
-  bindIslandViewport(document.getElementById('full-garden-viewport'), document.getElementById('full-island-svg'), { allowZoom: true, topPadPx: ISLAND_FULL_TOP_PAD_PX });
   window.addEventListener('resize', () => {
-    if (ui.screen === 'home' && lastIslandContext) {
-      alignHomeIslandViewBox(lastIslandContext.evalData.region.size);
-    } else if (ui.screen === 'garden' && lastIslandContext) {
-      alignFullIslandViewBox(lastIslandContext.evalData.region.size);
-    }
+    islandStage.alignActiveViewBox();
     updateEssayCardLineClamps();
   });
 
@@ -3031,7 +3154,6 @@ async function boot() {
       if (!drag.dragged && Math.abs(dx) > 5) {
         drag.dragged = true;
         ui.carouselDidDrag = true;
-        closeReactionTray();
         drag.rowEl.classList.add('is-dragging');
       }
       if (drag.dragged) {
@@ -3098,15 +3220,6 @@ async function boot() {
   bindEssayRowDrag(document.getElementById('essay-carousel'), { enableTailPull: true });
   bindEssayRowDrag(document.getElementById('essays-day-list'), { enableTailPull: false });
 
-  document.getElementById('full-island-svg').onclick = (e) => {
-    if (ui.didDrag || !lastIslandContext) return;
-    const poly = e.target.closest('[data-cell-x]');
-    if (!poly) return;
-    const x = parseInt(poly.dataset.cellX, 10);
-    const y = parseInt(poly.dataset.cellY, 10);
-    handleGardenCellClick(lastIslandContext.viewGarden.id, lastIslandContext.evalData, x, y);
-  };
-
   const closeDismissibleModal = () => {
     if (reactionState.tray) {
       closeReactionTray();
@@ -3120,6 +3233,12 @@ async function boot() {
   document.getElementById('modal-overlay').onclick = (e) => {
     if (e.target === e.currentTarget) closeDismissibleModal();
   };
+  document.getElementById('modal-box').addEventListener('click', (ev) => {
+    if (!ev.target.closest('#modal-close')) return;
+    ui.activeModal = null;
+    ui.modalData = null;
+    renderModal();
+  });
   window.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeDismissibleModal();
   });
@@ -3159,13 +3278,14 @@ async function boot() {
   window.__renderApp = renderApp;
 
   // 首屏立即渲染（若有 localStorage 快取則 < 300ms 秒開首繪，無須等待 GAS 回應）
+  syncMonthTransition();
   renderApp();
 
   // 背景同步雲端最新狀態（Stale-While-Revalidate）
   if (store.isCloud && store.isAuthenticated()) {
     store.initSession()
       .then(() => {
-        renderApp();
+        refreshAfterBackgroundSync();
       })
       .catch((err) => {
         if (err?.code === 'AUTH_INVALID') {
@@ -3178,4 +3298,6 @@ async function boot() {
   }
 }
 
-boot();
+if (typeof document !== 'undefined' && document.getElementById('app-container')) {
+  boot();
+}

@@ -8,18 +8,9 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     :root {
-      --bg-sky-top: #bce3da;
-      --bg-sky-mid: #d6efe7;
-      --bg-sky-bot: #eef7f0;
       --surface-cream: #fffdf8;
-      --surface-oat: #f6f0e4;
       --border-warm: #e5dec9;
-      --forest-deep: #1d4237;
-      --forest-primary: #2b5e4e;
-      --forest-sage: #628b78;
       --text-cocoa: #382e26;
-      --text-muted: #786b5e;
-      --accent-amber: #df8a2b;
     }
     html, body {
       height: 100%;
@@ -48,14 +39,6 @@
       0%, 100% { transform: translateY(0px); }
       50% { transform: translateY(-3px); }
     }
-    @keyframes cloud-drift {
-      0%, 100% { transform: translateX(0px); }
-      50% { transform: translateX(10px); }
-    }
-    @keyframes bokeh-drift {
-      0%, 100% { opacity: 0.28; transform: translateY(0px) scale(1); }
-      50% { opacity: 0.65; transform: translateY(-10px) scale(1.12); }
-    }
     @keyframes pulse-ring {
       0%, 100% { opacity: 0.45; transform: scale(0.96); }
       50% { opacity: 0.95; transform: scale(1.05); }
@@ -63,8 +46,6 @@
     .island-float { animation: float-island 5.5s ease-in-out infinite; }
     .card-float { animation: float-card 6.5s ease-in-out infinite; }
     .card-float:hover, .card-float:active { animation-play-state: paused; }
-    .cloud-drift { animation: cloud-drift 14s ease-in-out infinite; }
-    .bokeh-dot { animation: bokeh-drift 6s ease-in-out infinite; }
     .slot-pulse { animation: pulse-ring 2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
     @keyframes react-pop {
       0% { transform: scale(1); }
@@ -121,7 +102,7 @@
       transform: translate(-50%, 0);
     }
     @media (prefers-reduced-motion: reduce) {
-      .island-float, .card-float, .cloud-drift, .bokeh-dot, .slot-pulse, .react-pop, .reaction-tray-in, .home-fade-out, .essays-header-in, .essay-row-fly-in { animation: none; }
+      .island-float, .card-float, .slot-pulse, .react-pop, .reaction-tray-in, .home-fade-out, .essays-header-in, .essay-row-fly-in { animation: none; }
     }
     .cozy-card {
       background: var(--surface-cream);
@@ -182,27 +163,13 @@
     .memo-text {
       display: -webkit-box;
       -webkit-box-orient: vertical;
-      -webkit-line-clamp: 7;
       overflow: hidden;
+      text-overflow: ellipsis;
       white-space: pre-wrap;
       word-break: break-word;
       text-align: justify;
       text-justify: inter-ideograph;
       text-align-last: left;
-    }
-    .memo-text-compact {
-      display: -webkit-box;
-      -webkit-box-orient: vertical;
-      -webkit-line-clamp: 3;
-      overflow: hidden;
-      white-space: pre-wrap;
-      word-break: break-word;
-      text-align: justify;
-      text-justify: inter-ideograph;
-      text-align-last: left;
-    }
-    @media (min-height: 760px) {
-      .memo-text-compact { -webkit-line-clamp: 4; }
     }
     .no-scrollbar::-webkit-scrollbar { display: none; }
     .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
@@ -306,7 +273,7 @@
         <button id="home-next-month" title="下一個月份花園" class="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 text-[#1d4237] drop-shadow-[0_2px_5px_rgba(255,255,255,0.95)] hover:scale-110 active:scale-95 disabled:opacity-20 disabled:pointer-events-none transition"></button>
 
         <!-- 懸浮於底部的精簡月份、佈置入口與植物統計膠囊（z-35 獨立於小島上下文之上，絕不被雨絲與泡泡遮擋） -->
-        <div id="home-floating-info" class="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center" style="z-index: 35 !important;">
+        <div id="home-floating-info" class="pointer-events-none absolute inset-x-3 bottom-3 flex justify-center" style="z-index: 35;">
           <div class="pointer-events-auto sky-pill rounded-2xl px-3.5 py-1.5 text-center space-y-0.5 max-w-full">
             <div class="flex items-center justify-center gap-1.5 flex-wrap">
               <span id="home-region-month-title" class="text-sm font-extrabold text-[#1d4237]">2026-11 ・ 春櫻花圃</span>
@@ -354,7 +321,7 @@
         </div>
 
         <!-- 懸浮於底部的月份與區域資訊膠囊（style z-index 35 脫離小島上下文，絕不被雨絲與泡泡遮擋） -->
-        <div id="full-floating-info" class="pointer-events-none absolute inset-x-3 bottom-2.5 flex justify-center" style="z-index: 35 !important;">
+        <div id="full-floating-info" class="pointer-events-none absolute inset-x-3 bottom-2.5 flex justify-center" style="z-index: 35;">
           <div class="sky-pill rounded-2xl px-3 py-1.5 text-center space-y-0.5 w-auto max-w-full">
             <div class="relative flex items-center justify-center w-full min-h-[22px]">
               <span id="full-region-month-title" class="text-sm font-extrabold text-[#1d4237] text-center">2026-11 ・ 春櫻花圃</span>
@@ -399,6 +366,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261123c"></script>
+  <script type="module" src="./app.js?v=20261123d"></script>
 </body>
 </html>
