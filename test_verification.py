@@ -10,7 +10,7 @@ from playwright._impl._driver import compute_driver_executable
 from playwright.sync_api import sync_playwright
 
 ROOT_DIR = r"d:\Antigravity workspaces\交通美地"
-ASSET_VER = "20261123f"
+ASSET_VER = "20261124a"
 
 
 def load_text(name):
