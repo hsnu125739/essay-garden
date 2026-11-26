@@ -2,47 +2,55 @@
 // 每款主題為自包含物件：{ sky, css?, thumbSvg, mount(scope), onScreenChange?(screen, scope) }
 // 新增背景只需在 BG_THEMES 增加一個鍵，並同步更新 catalog.json 與 gas/Code.gs 的 bgThemes。
 
+// 將含濾鏡／漸層的靜態 SVG 轉為單一 Data URI，讓瀏覽器只光柵化一次並於多粒子間共用同一張 GPU 貼圖
+function svgToDataUri(svg) {
+  return 'data:image/svg+xml,' + encodeURIComponent(svg.trim().replace(/\s+/g, ' '));
+}
+
 // =========================================================================
 // 1. 可選共用原語函式（純函式 helper，主題可自由決定是否呼叫）
 // =========================================================================
 
 /**
  * 飄浮雲朵引擎原語（morning / sunset 共用）：
- * 高斯常態分佈高度 + 3 朵預熱 + 0.5s 負反饋隨機生成 + animationiteration 高度重抽
+ * - 預編譯雲朵貼圖複用（零執行期 SVG 濾鏡重繪）
+ * - 3 朵初始雲以負 animation-delay 立即展開於畫面 22% / 58% / 85%
+ * - 第 4、5 朵雲依負反饋機率幾何分佈單次排程進場，到齊後零常駐計時器
  */
-export function mountCloudDrift(scope, { makeCloudSvg, backdropHtml = '' }) {
+export function mountCloudDrift(scope, { cloudUri, baseW = 320, baseH = 180, pad = 24, backdropHtml = '' }) {
   if (backdropHtml) scope.setBackHtml(backdropHtml);
 
-  const activeClouds = new Set();
+  const paddedW = baseW + pad * 2;
+  const paddedH = baseH + pad * 2;
 
   const spawnOne = (initialOffsetPercent = null) => {
-    const cloudId = scope.uid('c');
     const el = scope.createElement('div', 'absolute pointer-events-none');
     if (!el) return;
-    el.id = cloudId;
+    el.id = scope.uid('c');
 
     const normY = Math.max(14, Math.min(64, scope.normal(38.0, 9.5)));
     const zDist = scope.prng();
     const scale = 0.28 + zDist * 0.16;
-    const opacity = 0.70 + zDist * 0.25;
+    const opacity = (0.70 + zDist * 0.25).toFixed(3);
     const isForeground = zDist > 0.72; // 近景蓋過花園島上方
     const duration = 22 + (1.0 - zDist) * 16 + scope.prng() * 4;
+    const delaySec = initialOffsetPercent !== null ? -(initialOffsetPercent * duration) : 0;
 
     if (el.style) {
       el.style.top = normY + '%';
       el.style.left = '0px';
       el.style.zIndex = isForeground ? '30' : '5';
-      el.style.animation = `cloudFloatLeftToRight ${duration}s linear infinite`;
-      if (initialOffsetPercent !== null) {
-        const startX = -240 + initialOffsetPercent * (450 + 240);
-        el.style.transform = `translateX(${startX}px)`;
-      }
+      el.style.willChange = 'transform';
+      el.style.animation = `cloudFloatLeftToRight ${duration.toFixed(2)}s linear infinite ${delaySec.toFixed(2)}s both`;
     }
 
-    el.innerHTML = scope.scopeSvg(makeCloudSvg(scale, opacity));
+    const w = (paddedW * scale).toFixed(1);
+    const h = (paddedH * scale).toFixed(1);
+    const m = (-pad * scale).toFixed(1);
+    el.innerHTML = `<img src="${cloudUri}" alt="" decoding="async" class="block pointer-events-none select-none" style="width:${w}px;height:${h}px;margin:${m}px 0 0 ${m}px;max-width:none;opacity:${opacity};"/>`;
+
     if (isForeground) scope.appendFore(el);
     else scope.appendBack(el);
-    activeClouds.add(cloudId);
 
     scope.on(el, 'animationiteration', () => {
       const nextY = Math.max(14, Math.min(64, scope.normal(38.0, 9.5)));
@@ -55,16 +63,21 @@ export function mountCloudDrift(scope, { makeCloudSvg, backdropHtml = '' }) {
   spawnOne(0.58);
   spawnOne(0.85);
 
-  // 0.5s 負反饋隨機調度：P = max(0, 20% - 4% * X)
-  scope.every(500, () => {
-    const prob = Math.max(0, 0.20 - 0.04 * activeClouds.size);
-    if (scope.prng() < prob) spawnOne(null);
-  });
+  // 原每 0.5s 負反饋機率 P = max(0, 0.20 - 0.04 * count)：count=3 時 P=0.08，count=4 時 P=0.04，count=5 時 P=0
+  // 直接以幾何分佈取樣精確等待時間排程第 4、5 朵雲，免除永久 500ms 空轉 setInterval
+  const sampleGeomMs = (p) => {
+    const u = Math.min(0.999999, scope.prng());
+    return (1 + Math.floor(Math.log(1 - u) / Math.log(1 - p))) * 500;
+  };
+  const wait4 = sampleGeomMs(0.08);
+  const wait5 = wait4 + sampleGeomMs(0.04);
+  scope.after(wait4, () => spawnOne(null));
+  scope.after(wait5, () => spawnOne(null));
 }
 
 /**
- * 動態隨機閃爍微粒池原語（night 星芒與未來螢火蟲／光點可共用）：
- * 經由 scope.after / scope.on 託管，回呼觸發即移除追蹤，停留再久零記憶體洩漏
+ * 動態隨機閃爍微粒池原語（固定節點池複用 Object Pool）：
+ * 節點只建立一次，animationend 時原地更新座標／尺寸／快取貼圖並重播動畫，執行期零 DOM 增刪與零 SVG 重解析
  */
 export function mountTwinklePool(scope, {
   layer = 'back',
@@ -79,168 +92,206 @@ export function mountTwinklePool(scope, {
 }) {
   const append = layer === 'fore' ? (el) => scope.appendFore(el) : (el) => scope.appendBack(el);
 
-  const spawn = () => {
-    const el = scope.createElement('div', nodeClass);
-    if (!el) return;
-
+  const placeAndPlay = (el) => {
     const left = leftRange[0] + scope.prng() * (leftRange[1] - leftRange[0]);
     const top = topRange[0] + scope.prng() * (topRange[1] - topRange[0]);
     const dur = durRange[0] + scope.prng() * (durRange[1] - durRange[0]);
+    const spec = render(scope);
 
     if (el.style) {
       el.style.left = left + '%';
       el.style.top = top + '%';
+      if (spec && typeof spec === 'object' && spec.size) {
+        el.style.width = spec.size + 'px';
+        el.style.height = spec.size + 'px';
+      }
+      el.style.animation = 'none';
+      if (typeof el.offsetWidth === 'number') void el.offsetWidth;
+      el.style.animation = '';
       el.style.animationDuration = dur + 's';
     }
-    el.innerHTML = scope.scopeSvg(render(scope));
 
-    scope.on(el, 'animationend', () => {
-      el.remove?.();
-      const delay = respawnRange[0] + scope.prng() * (respawnRange[1] - respawnRange[0]);
-      scope.after(delay, spawn);
-    });
-
-    append(el);
+    if (typeof spec === 'string') {
+      el.innerHTML = scope.scopeSvg(spec);
+    } else if (spec && el.firstElementChild) {
+      const img = el.firstElementChild;
+      img.src = spec.src;
+      img.style.width = spec.boxPx + 'px';
+      img.style.height = spec.boxPx + 'px';
+      img.style.margin = spec.marginPx + 'px';
+    }
   };
 
   for (let i = 0; i < poolSize; i++) {
-    scope.after(i * staggerMs, spawn);
+    scope.after(i * staggerMs, () => {
+      const el = scope.createElement(
+        'div',
+        nodeClass,
+        '<img alt="" decoding="async" class="block pointer-events-none select-none" style="max-width:none;"/>'
+      );
+      if (!el) return;
+      placeAndPlay(el);
+
+      scope.on(el, 'animationend', () => {
+        if (el.style) el.style.animation = 'none';
+        const delay = respawnRange[0] + scope.prng() * (respawnRange[1] - respawnRange[0]);
+        scope.after(delay, () => placeAndPlay(el));
+      });
+
+      append(el);
+    });
   }
 }
 
 // =========================================================================
-// 2. 各主題專屬 SVG / HTML 生成輔助（ID 由 BgManager.scopeSvgIds 自動隔離）
+// 2. 預編譯貼圖資源（模組載入時建立一次，所有實例共用單一 GPU 貼圖）
 // =========================================================================
 
-function makeMorningCloudSvg(scale, opacity) {
-  return `
-    <svg viewBox="0 0 320 180" width="${320 * scale}" height="${180 * scale}" class="overflow-visible" style="opacity: ${opacity}; pointer-events: none;">
-      <defs>
-        <linearGradient id="cloudGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#ffffff"/>
-          <stop offset="65%" stop-color="#f0f6f9"/>
-          <stop offset="100%" stop-color="#d4e3eb"/>
-        </linearGradient>
-        <filter id="cloudFeather" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="3.8" result="softEdge"/>
-          <feDropShadow dx="0" dy="5" stdDeviation="4.5" flood-color="#2a5368" flood-opacity="0.14"/>
-        </filter>
-      </defs>
-      <g filter="url(#cloudFeather)">
-        <path d="M 55 135 C 25 135, 12 115, 20 95 C 15 72, 38 52, 62 56 C 78 28, 115 18, 145 28 C 170 10, 212 14, 232 40 C 260 30, 290 52, 295 80 C 318 90, 322 118, 305 135 Z" fill="url(#cloudGrad)"/>
-        <circle cx="145" cy="50" r="26" fill="#ffffff" opacity="0.65"/>
-        <circle cx="205" cy="54" r="30" fill="#ffffff" opacity="0.6"/>
-        <circle cx="85" cy="72" r="20" fill="#ffffff" opacity="0.55"/>
-        <ellipse cx="165" cy="115" rx="85" ry="16" fill="#e0ecf2" opacity="0.7"/>
-      </g>
-    </svg>`;
+const MORNING_CLOUD_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -24 368 228">
+    <defs>
+      <linearGradient id="cg" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="65%" stop-color="#f0f6f9"/>
+        <stop offset="100%" stop-color="#d4e3eb"/>
+      </linearGradient>
+      <filter id="cf" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3.8" result="softEdge"/>
+        <feDropShadow dx="0" dy="5" stdDeviation="4.5" flood-color="#2a5368" flood-opacity="0.14"/>
+      </filter>
+    </defs>
+    <g filter="url(#cf)">
+      <path d="M 55 135 C 25 135, 12 115, 20 95 C 15 72, 38 52, 62 56 C 78 28, 115 18, 145 28 C 170 10, 212 14, 232 40 C 260 30, 290 52, 295 80 C 318 90, 322 118, 305 135 Z" fill="url(#cg)"/>
+      <circle cx="145" cy="50" r="26" fill="#ffffff" opacity="0.65"/>
+      <circle cx="205" cy="54" r="30" fill="#ffffff" opacity="0.6"/>
+      <circle cx="85" cy="72" r="20" fill="#ffffff" opacity="0.55"/>
+      <ellipse cx="165" cy="115" rx="85" ry="16" fill="#e0ecf2" opacity="0.7"/>
+    </g>
+  </svg>
+`);
+
+const SUNSET_CLOUD_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-24 -24 388 228">
+    <defs>
+      <linearGradient id="scg" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#fed7aa"/>
+        <stop offset="25%" stop-color="#fca5a5"/>
+        <stop offset="70%" stop-color="#c084fc"/>
+        <stop offset="100%" stop-color="#47265a"/>
+      </linearGradient>
+      <linearGradient id="gr" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#fef08a"/>
+        <stop offset="50%" stop-color="#f59e0b"/>
+        <stop offset="100%" stop-color="#ec4899"/>
+      </linearGradient>
+      <filter id="scf" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="3.6" result="softEdge"/>
+        <feDropShadow dx="0" dy="6" stdDeviation="5.5" flood-color="#180c2e" flood-opacity="0.32"/>
+      </filter>
+    </defs>
+    <g filter="url(#scf)">
+      <path d="M 60 135 C 30 135, 14 115, 22 95 C 16 70, 42 50, 68 54 C 85 24, 122 15, 155 25 C 182 8, 225 12, 248 38 C 278 28, 308 50, 312 78 C 335 88, 338 116, 320 135 Z"
+            fill="url(#scg)" stroke="url(#gr)" stroke-width="2.5"/>
+      <path d="M 65 52 C 85 24, 122 15, 155 25 C 182 8, 225 12, 248 38 C 278 28, 308 50, 312 78"
+            fill="none" stroke="#fef08a" stroke-width="3" opacity="0.85"/>
+      <circle cx="155" cy="46" r="28" fill="#fed7aa" opacity="0.45"/>
+      <circle cx="218" cy="50" r="32" fill="#fb923c" opacity="0.4"/>
+      <ellipse cx="175" cy="118" rx="95" ry="16" fill="#6d3d7d" opacity="0.4"/>
+    </g>
+  </svg>
+`);
+
+const STAR_URI_CACHE = new Map();
+function getStarDataUri(color) {
+  let uri = STAR_URI_CACHE.get(color);
+  if (!uri) {
+    uri = svgToDataUri(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="-12 -12 72 72">
+        <defs>
+          <filter id="sg" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.6" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#sg)">
+          <path d="M 24 2 C 24 16, 18 20, 2 24 C 18 28, 24 32, 24 46 C 24 32, 30 28, 46 24 C 30 20, 24 16, 24 2 Z" fill="${color}"/>
+          <path d="M 24 10 C 24 19, 20 21, 10 24 C 20 27, 24 29, 24 38 C 24 29, 28 27, 38 24 C 28 21, 24 19, 24 10 Z" fill="${color}" opacity="0.7" transform="rotate(45 24 24)"/>
+          <circle cx="24" cy="24" r="2.8" fill="#ffffff"/>
+        </g>
+      </svg>
+    `);
+    STAR_URI_CACHE.set(color, uri);
+  }
+  return uri;
 }
 
-function makeSunsetCloudSvg(scale, opacity) {
-  return `
-    <svg viewBox="0 0 340 180" width="${340 * scale}" height="${180 * scale}" class="overflow-visible" style="opacity: ${opacity}; pointer-events: none;">
-      <defs>
-        <linearGradient id="sunsetCloudGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="#fed7aa"/>
-          <stop offset="25%" stop-color="#fca5a5"/>
-          <stop offset="70%" stop-color="#c084fc"/>
-          <stop offset="100%" stop-color="#47265a"/>
-        </linearGradient>
-        <linearGradient id="goldRim" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stop-color="#fef08a"/>
-          <stop offset="50%" stop-color="#f59e0b"/>
-          <stop offset="100%" stop-color="#ec4899"/>
-        </linearGradient>
-        <filter id="sunsetCloudFeather" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="3.6" result="softEdge"/>
-          <feDropShadow dx="0" dy="6" stdDeviation="5.5" flood-color="#180c2e" flood-opacity="0.32"/>
-        </filter>
-      </defs>
-      <g filter="url(#sunsetCloudFeather)">
-        <path d="M 60 135 C 30 135, 14 115, 22 95 C 16 70, 42 50, 68 54 C 85 24, 122 15, 155 25 C 182 8, 225 12, 248 38 C 278 28, 308 50, 312 78 C 335 88, 338 116, 320 135 Z"
-              fill="url(#sunsetCloudGrad)" stroke="url(#goldRim)" stroke-width="2.5"/>
-        <path d="M 65 52 C 85 24, 122 15, 155 25 C 182 8, 225 12, 248 38 C 278 28, 308 50, 312 78"
-              fill="none" stroke="#fef08a" stroke-width="3" opacity="0.85"/>
-        <circle cx="155" cy="46" r="28" fill="#fed7aa" opacity="0.45"/>
-        <circle cx="218" cy="50" r="32" fill="#fb923c" opacity="0.4"/>
-        <ellipse cx="175" cy="118" rx="95" ry="16" fill="#6d3d7d" opacity="0.4"/>
-      </g>
-    </svg>`;
-}
-
-function makeMicroCrossStarSvg(size = 18, color = '#ffffff') {
-  return `
-    <svg viewBox="0 0 48 48" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none;">
-      <defs>
-        <filter id="microCrossGlow" x="-60%" y="-60%" width="220%" height="220%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2.2" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-      <g filter="url(#microCrossGlow)">
-        <path d="M 24 2 C 24 16, 18 20, 2 24 C 18 28, 24 32, 24 46 C 24 32, 30 28, 46 24 C 30 20, 24 16, 24 2 Z" fill="${color}"/>
-        <path d="M 24 10 C 24 19, 20 21, 10 24 C 20 27, 24 29, 24 38 C 24 29, 28 27, 38 24 C 28 21, 24 19, 24 10 Z" fill="${color}" opacity="0.7" transform="rotate(45 24 24)"/>
-        <circle cx="24" cy="24" r="2.8" fill="#ffffff"/>
-      </g>
-    </svg>`;
-}
-
-function makeMeteorSvg({ length = 150, isBolide = false } = {}) {
+const METEOR_URI_CACHE = new Map();
+function makeMeteorImgHtml({ length = 150, isBolide = false } = {}) {
+  const key = `${length}_${isBolide ? 1 : 0}`;
   const headX = 14;
   const headY = 14;
   const totalW = length + 24;
   const totalH = 28;
-  const rHoriz = isBolide ? 16 : 10;
-  const rVert = isBolide ? 16 : 10;
-  const rDiag = isBolide ? 8 : 5;
-  const coreThick = isBolide ? 3.4 : 2.2;
-  const sheathThick = isBolide ? 8.5 : 5.0;
+  const pad = 16;
+  let uri = METEOR_URI_CACHE.get(key);
 
-  const tailCorePath = `M ${headX} ${headY - coreThick / 2} L ${totalW} ${headY - 0.4} L ${totalW} ${headY + 0.4} L ${headX} ${headY + coreThick / 2} Z`;
-  const tailSheathPath = `M ${headX} ${headY - sheathThick / 2} L ${totalW} ${headY - 0.8} L ${totalW} ${headY + 0.8} L ${headX} ${headY + sheathThick / 2} Z`;
+  if (!uri) {
+    const rHoriz = isBolide ? 16 : 10;
+    const rVert = isBolide ? 16 : 10;
+    const rDiag = isBolide ? 8 : 5;
+    const coreThick = isBolide ? 3.4 : 2.2;
+    const sheathThick = isBolide ? 8.5 : 5.0;
 
-  const diagFlare = isBolide ? `
-    <g transform="rotate(45 ${headX} ${headY})">
-      <path d="M ${headX - rDiag} ${headY} Q ${headX} ${headY - 0.7} ${headX + rDiag} ${headY} Q ${headX} ${headY + 0.7} ${headX - rDiag} ${headY} Z" fill="#ffffff" opacity="0.85"/>
-      <path d="M ${headX} ${headY - rDiag} Q ${headX - 0.7} ${headY} ${headX} ${headY + rDiag} Q ${headX + 0.7} ${headY} ${headX - rDiag} ${headY} Z" fill="#ffffff" opacity="0.85"/>
-    </g>` : '';
+    const tailCorePath = `M ${headX} ${headY - coreThick / 2} L ${totalW} ${headY - 0.4} L ${totalW} ${headY + 0.4} L ${headX} ${headY + coreThick / 2} Z`;
+    const tailSheathPath = `M ${headX} ${headY - sheathThick / 2} L ${totalW} ${headY - 0.8} L ${totalW} ${headY + 0.8} L ${headX} ${headY + sheathThick / 2} Z`;
 
-  return `
-    <svg viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" class="overflow-visible" style="pointer-events: none;">
-      <defs>
-        <linearGradient id="tailCore" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
-          <stop offset="10%" stop-color="#ffffff" stop-opacity="0.95"/>
-          <stop offset="28%" stop-color="#38bdf8" stop-opacity="0.9"/>
-          <stop offset="60%" stop-color="#2563eb" stop-opacity="0.55"/>
-          <stop offset="85%" stop-color="#1e3a8a" stop-opacity="0.2"/>
-          <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0"/>
-        </linearGradient>
-        <linearGradient id="tailSheath" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.85"/>
-          <stop offset="25%" stop-color="#60a5fa" stop-opacity="0.6"/>
-          <stop offset="65%" stop-color="#2563eb" stop-opacity="0.3"/>
-          <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0"/>
-        </linearGradient>
-        <filter id="tailGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="blur"/>
-          <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>
-      </defs>
-      <g>
-        <path d="${tailSheathPath}" fill="url(#tailSheath)" opacity="0.75" filter="url(#tailGlow)"/>
-        <path d="${tailCorePath}" fill="url(#tailCore)"/>
-        <circle cx="${headX}" cy="${headY}" r="${isBolide ? 14 : 8}" fill="#2563eb" opacity="0.35" filter="url(#tailGlow)"/>
-        <circle cx="${headX}" cy="${headY}" r="${isBolide ? 8 : 5}" fill="#38bdf8" opacity="0.75" filter="url(#tailGlow)"/>
+    const diagFlare = isBolide ? `
+      <g transform="rotate(45 ${headX} ${headY})">
+        <path d="M ${headX - rDiag} ${headY} Q ${headX} ${headY - 0.7} ${headX + rDiag} ${headY} Q ${headX} ${headY + 0.7} ${headX - rDiag} ${headY} Z" fill="#ffffff" opacity="0.85"/>
+        <path d="M ${headX} ${headY - rDiag} Q ${headX - 0.7} ${headY} ${headX} ${headY + rDiag} Q ${headX + 0.7} ${headY} ${headX - rDiag} Z" fill="#ffffff" opacity="0.85"/>
+      </g>` : '';
+
+    uri = svgToDataUri(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${totalW + pad * 2} ${totalH + pad * 2}">
+        <defs>
+          <linearGradient id="tc" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+            <stop offset="10%" stop-color="#ffffff" stop-opacity="0.95"/>
+            <stop offset="28%" stop-color="#38bdf8" stop-opacity="0.9"/>
+            <stop offset="60%" stop-color="#2563eb" stop-opacity="0.55"/>
+            <stop offset="85%" stop-color="#1e3a8a" stop-opacity="0.2"/>
+            <stop offset="100%" stop-color="#1e3a8a" stop-opacity="0"/>
+          </linearGradient>
+          <linearGradient id="ts" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.85"/>
+            <stop offset="25%" stop-color="#60a5fa" stop-opacity="0.6"/>
+            <stop offset="65%" stop-color="#2563eb" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0"/>
+          </linearGradient>
+          <filter id="tg" x="-30%" y="-50%" width="160%" height="200%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.4" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+        <g filter="url(#tg)">
+          <path d="${tailSheathPath}" fill="url(#ts)" opacity="0.75"/>
+          <circle cx="${headX}" cy="${headY}" r="${isBolide ? 14 : 8}" fill="#2563eb" opacity="0.35"/>
+          <circle cx="${headX}" cy="${headY}" r="${isBolide ? 8 : 5}" fill="#38bdf8" opacity="0.75"/>
+        </g>
+        <path d="${tailCorePath}" fill="url(#tc)"/>
         <path d="M ${headX - rHoriz} ${headY} Q ${headX} ${headY - 1} ${headX + rHoriz} ${headY} Q ${headX} ${headY + 1} ${headX - rHoriz} ${headY} Z" fill="#ffffff"/>
         <path d="M ${headX} ${headY - rVert} Q ${headX - 1} ${headY} ${headX} ${headY + rVert} Q ${headX + 1} ${headY} ${headX} ${headY - rVert} Z" fill="#ffffff"/>
         ${diagFlare}
         <circle cx="${headX}" cy="${headY}" r="${isBolide ? 2.8 : 2.0}" fill="#ffffff"/>
-      </g>
-    </svg>`;
+      </svg>
+    `);
+    METEOR_URI_CACHE.set(key, uri);
+  }
+
+  return `<img src="${uri}" alt="" decoding="async" class="block pointer-events-none select-none" style="width:${totalW + pad * 2}px;height:${totalH + pad * 2}px;margin:${-pad}px;max-width:none;"/>`;
 }
 
-function makeExactMathRainbowSvg() {
+const RAINBOW_URI = (() => {
   const X0 = 200;
   const Y0 = 240;
   const cos15 = 0.9659;
@@ -254,74 +305,80 @@ function makeExactMathRainbowSvg() {
     { r: 155, color: '#818cf8', opacity: 0.60, width: 16 },
     { r: 147, color: '#c084fc', opacity: 0.68, width: 16 }
   ];
-
   const arcD = (r) => {
     const startX = (X0 - r * cos15).toFixed(2);
     const y = (Y0 - r * sin15).toFixed(2);
     const endX = (X0 + r * cos15).toFixed(2);
     return `M ${startX} ${y} A ${r} ${r} 0 0 1 ${endX} ${y}`;
   };
-
   const paths = arcs.map((a) =>
     `<path d="${arcD(a.r)}" stroke="${a.color}" stroke-opacity="${a.opacity}" stroke-width="${a.width}" stroke-linecap="round"/>`
-  ).join('\n');
+  ).join('');
 
-  return `
-    <svg viewBox="0 0 400 250" class="w-full h-auto overflow-visible" style="pointer-events: none;">
+  return svgToDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 250">
       <defs>
-        <linearGradient id="rainbowFade" x1="0%" y1="0%" x2="100%" y2="0%">
+        <linearGradient id="rf" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
           <stop offset="12%" stop-color="#ffffff" stop-opacity="0.95"/>
           <stop offset="88%" stop-color="#ffffff" stop-opacity="0.95"/>
           <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
         </linearGradient>
-        <filter id="rainbowFeather" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="softBlur"/>
+        <filter id="rblur" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="5.5"/>
         </filter>
-        <mask id="rainbowMask">
-          <rect x="0" y="0" width="400" height="250" fill="url(#rainbowFade)"/>
+        <mask id="rm">
+          <rect x="0" y="0" width="400" height="250" fill="url(#rf)"/>
         </mask>
       </defs>
-      <g mask="url(#rainbowMask)" fill="none">
-        <path d="${arcD(171)}" stroke="#ffffff" stroke-width="58" stroke-opacity="0.35" filter="url(#rainbowFeather)"/>
-        <g filter="url(#rainbowFeather)">${paths}</g>
-        <path d="${arcD(200)}" stroke="#ffffff" stroke-width="3" stroke-opacity="0.55" filter="url(#rainbowFeather)"/>
+      <g mask="url(#rm)" fill="none">
+        <g filter="url(#rblur)">
+          <path d="${arcD(171)}" stroke="#ffffff" stroke-width="58" stroke-opacity="0.35"/>
+          ${paths}
+          <path d="${arcD(200)}" stroke="#ffffff" stroke-width="3" stroke-opacity="0.55"/>
+        </g>
       </g>
-    </svg>`;
-}
+    </svg>
+  `);
+})();
 
-function makeGodRaysSvg() {
-  return `
-    <svg viewBox="0 0 400 400" preserveAspectRatio="none" class="anim-god-rays absolute inset-0 w-full h-full pointer-events-none">
-      <defs>
-        <linearGradient id="ray1" x1="80%" y1="0%" x2="20%" y2="100%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
-          <stop offset="35%" stop-color="#fef08a" stop-opacity="0.32"/>
-          <stop offset="75%" stop-color="#bae6fd" stop-opacity="0.12"/>
-          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-        </linearGradient>
-        <linearGradient id="ray2" x1="90%" y1="0%" x2="35%" y2="100%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
-          <stop offset="40%" stop-color="#fde047" stop-opacity="0.35"/>
-          <stop offset="85%" stop-color="#fbcfe8" stop-opacity="0.1"/>
-          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-        </linearGradient>
-        <linearGradient id="ray3" x1="65%" y1="0%" x2="5%" y2="100%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
-          <stop offset="45%" stop-color="#fef08a" stop-opacity="0.25"/>
-          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
-        </linearGradient>
-        <filter id="rayGlow" x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation="8.5"/>
-        </filter>
-      </defs>
-      <g filter="url(#rayGlow)">
-        <polygon points="260,-20 340,-20 120,420 40,420" fill="url(#ray1)"/>
-        <polygon points="350,-20 420,-20 230,420 150,420" fill="url(#ray2)"/>
-        <polygon points="180,-20 230,-20 30,420 -30,420" fill="url(#ray3)"/>
-      </g>
-    </svg>`;
-}
+const GOD_RAYS_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id="ray1" x1="80%" y1="0%" x2="20%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.55"/>
+        <stop offset="35%" stop-color="#fef08a" stop-opacity="0.32"/>
+        <stop offset="75%" stop-color="#bae6fd" stop-opacity="0.12"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="ray2" x1="90%" y1="0%" x2="35%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+        <stop offset="40%" stop-color="#fde047" stop-opacity="0.35"/>
+        <stop offset="85%" stop-color="#fbcfe8" stop-opacity="0.1"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </linearGradient>
+      <linearGradient id="ray3" x1="65%" y1="0%" x2="5%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+        <stop offset="45%" stop-color="#fef08a" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+      </linearGradient>
+      <filter id="rg" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="8.5"/>
+      </filter>
+    </defs>
+    <g filter="url(#rg)">
+      <polygon points="260,-20 340,-20 120,420 40,420" fill="url(#ray1)"/>
+      <polygon points="350,-20 420,-20 230,420 150,420" fill="url(#ray2)"/>
+      <polygon points="180,-20 230,-20 30,420 -30,420" fill="url(#ray3)"/>
+    </g>
+  </svg>
+`);
+
+const BOKEH_SPARKLE_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    <path d="M 12 2 Q 12 12 2 12 Q 12 12 12 22 Q 12 12 22 12 Q 12 12 12 2 Z" fill="#ffffff"/>
+  </svg>
+`);
 
 function makeMoistureBokehHtml() {
   const particles = [
@@ -336,56 +393,64 @@ function makeMoistureBokehHtml() {
 
   return particles.map((p) => {
     const sparkleHtml = p.sparkle
-      ? `<svg viewBox="0 0 24 24" class="w-full h-full text-white drop-shadow-[0_0_4px_rgba(255,255,255,0.8)]"><path d="M 12 2 Q 12 12 2 12 Q 12 12 12 22 Q 12 12 22 12 Q 12 12 12 2 Z" fill="#ffffff"/></svg>`
+      ? `<img src="${BOKEH_SPARKLE_URI}" alt="" decoding="async" class="w-full h-full pointer-events-none select-none"/>`
       : '';
     return `
-      <div class="anim-bokeh-drift absolute rounded-full ${p.color} blur-[1.5px] pointer-events-none flex items-center justify-center"
-           style="top: ${p.top}; left: ${p.left}; width: ${p.size}px; height: ${p.size}px; --b-dur: ${p.dur}; --b-del: ${p.del};">
+      <div class="anim-bokeh-drift absolute rounded-full ${p.color} pointer-events-none flex items-center justify-center"
+           style="top: ${p.top}; left: ${p.left}; width: ${p.size}px; height: ${p.size}px; --b-dur: ${p.dur}; --b-del: ${p.del}; box-shadow: 0 0 4px rgba(255,255,255,0.65);">
         ${sparkleHtml}
       </div>`;
   }).join('');
 }
 
-function makeRealSoapBubbleSvg(size = 54) {
-  return `
-    <svg viewBox="0 0 100 100" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none; filter: drop-shadow(0 6px 16px rgba(56, 189, 248, 0.4)) drop-shadow(0 2px 6px rgba(192, 132, 252, 0.25));">
-      <defs>
-        <radialGradient id="sphere" cx="36%" cy="32%" r="64%">
-          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
-          <stop offset="25%" stop-color="#ffffff" stop-opacity="0.08"/>
-          <stop offset="65%" stop-color="#38bdf8" stop-opacity="0.12"/>
-          <stop offset="85%" stop-color="#c084fc" stop-opacity="0.28"/>
-          <stop offset="96%" stop-color="#f472b6" stop-opacity="0.45"/>
-          <stop offset="100%" stop-color="#0284c7" stop-opacity="0.55"/>
-        </radialGradient>
-        <linearGradient id="film" x1="12%" y1="15%" x2="88%" y2="85%">
-          <stop offset="0%" stop-color="#f472b6" stop-opacity="0.48"/>
-          <stop offset="22%" stop-color="#fbbf24" stop-opacity="0.42"/>
-          <stop offset="45%" stop-color="#34d399" stop-opacity="0.45"/>
-          <stop offset="70%" stop-color="#38bdf8" stop-opacity="0.52"/>
-          <stop offset="88%" stop-color="#818cf8" stop-opacity="0.50"/>
-          <stop offset="100%" stop-color="#c084fc" stop-opacity="0.58"/>
-        </linearGradient>
-        <linearGradient id="swirl" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.7"/>
-          <stop offset="48%" stop-color="#4ade80" stop-opacity="0.6"/>
-          <stop offset="100%" stop-color="#f472b6" stop-opacity="0.75"/>
-        </linearGradient>
-      </defs>
-      <circle cx="50" cy="50" r="44" fill="url(#sphere)"/>
-      <circle cx="50" cy="50" r="44" fill="url(#film)"/>
+const SOAP_BUBBLE_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-50 -50 200 200">
+    <defs>
+      <radialGradient id="sp" cx="36%" cy="32%" r="64%">
+        <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+        <stop offset="25%" stop-color="#ffffff" stop-opacity="0.08"/>
+        <stop offset="65%" stop-color="#38bdf8" stop-opacity="0.12"/>
+        <stop offset="85%" stop-color="#c084fc" stop-opacity="0.28"/>
+        <stop offset="96%" stop-color="#f472b6" stop-opacity="0.45"/>
+        <stop offset="100%" stop-color="#0284c7" stop-opacity="0.55"/>
+      </radialGradient>
+      <linearGradient id="fl" x1="12%" y1="15%" x2="88%" y2="85%">
+        <stop offset="0%" stop-color="#f472b6" stop-opacity="0.48"/>
+        <stop offset="22%" stop-color="#fbbf24" stop-opacity="0.42"/>
+        <stop offset="45%" stop-color="#34d399" stop-opacity="0.45"/>
+        <stop offset="70%" stop-color="#38bdf8" stop-opacity="0.52"/>
+        <stop offset="88%" stop-color="#818cf8" stop-opacity="0.50"/>
+        <stop offset="100%" stop-color="#c084fc" stop-opacity="0.58"/>
+      </linearGradient>
+      <linearGradient id="sw" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.7"/>
+        <stop offset="48%" stop-color="#4ade80" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#f472b6" stop-opacity="0.75"/>
+      </linearGradient>
+      <filter id="bds" x="-45%" y="-45%" width="190%" height="190%">
+        <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#38bdf8" flood-opacity="0.4"/>
+        <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#c084fc" flood-opacity="0.25"/>
+      </filter>
+      <filter id="swb" x="-10%" y="-20%" width="120%" height="140%">
+        <feGaussianBlur stdDeviation="0.6"/>
+      </filter>
+    </defs>
+    <g filter="url(#bds)">
+      <circle cx="50" cy="50" r="44" fill="url(#sp)"/>
+      <circle cx="50" cy="50" r="44" fill="url(#fl)"/>
       <circle cx="50" cy="50" r="44.5" fill="none" stroke="rgba(255,255,255,0.88)" stroke-width="1.6"/>
-      <circle cx="50" cy="50" r="43.2" fill="none" stroke="url(#film)" stroke-width="1.8" opacity="0.65"/>
-      <path d="M 22 72 A 36 36 0 0 0 78 72" fill="none" stroke="url(#swirl)" stroke-width="3.0" stroke-linecap="round" opacity="0.65" style="filter: blur(0.6px);"/>
+      <circle cx="50" cy="50" r="43.2" fill="none" stroke="url(#fl)" stroke-width="1.8" opacity="0.65"/>
+      <path d="M 22 72 A 36 36 0 0 0 78 72" fill="none" stroke="url(#sw)" stroke-width="3.0" stroke-linecap="round" opacity="0.65" filter="url(#swb)"/>
       <path d="M 10.5 37.2 A 41.5 41.5 0 0 1 48.6 8.5 A 37 37 0 0 0 14.8 38.6 Q 11.5 38.5 10.5 37.2 Z" fill="#ffffff" opacity="0.96"/>
       <ellipse cx="45" cy="15" rx="3.5" ry="1.8" transform="rotate(-30 45 15)" fill="#ffffff" opacity="0.95"/>
       <circle cx="18" cy="42" r="1.8" fill="#ffffff" opacity="0.9"/>
       <path d="M 67.5 87.6 A 41.5 41.5 0 0 0 90.1 60.7 A 38.5 38.5 0 0 1 69.2 84.8 Z" fill="#ffffff" opacity="0.65"/>
       <path d="M 64 88 A 42 42 0 0 0 89 63" fill="none" stroke="rgba(56, 189, 248, 0.7)" stroke-width="1.4" stroke-linecap="round"/>
-    </svg>`;
-}
+    </g>
+  </svg>
+`);
 
-function makeSnowflakeSvg(variant = 'dendrite', size = 18) {
+function buildSnowflakeUri(variant) {
   const angles = [0, 60, 120, 180, 240, 300];
   const arm = variant === 'plate'
     ? `<line x1="50" y1="50" x2="50" y2="12"/><path d="M 44 19 L 50 14 L 56 19"/><line x1="45" y1="29" x2="55" y2="29"/>`
@@ -397,17 +462,43 @@ function makeSnowflakeSvg(variant = 'dendrite', size = 18) {
     : `<polygon points="50,42 57,46 57,54 50,58 43,54 43,46" fill="#dcebf7" fill-opacity="0.72" stroke="#ffffff" stroke-width="2.2"/>
        <circle cx="50" cy="50" r="2.8" fill="#9ec0de" stroke="none"/>`;
 
-  return `
-    <svg viewBox="0 0 100 100" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none; filter: drop-shadow(0 1px 3px rgba(78, 118, 158, 0.55));">
-      <g fill="none" stroke="#97b6d3" stroke-width="5.4" stroke-opacity="0.42" stroke-linecap="round" stroke-linejoin="round">
-        ${arms}
+  return svgToDataUri(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="-25 -25 150 150">
+      <defs>
+        <filter id="sfds" x="-35%" y="-35%" width="170%" height="170%">
+          <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#4e769e" flood-opacity="0.58"/>
+        </filter>
+      </defs>
+      <g filter="url(#sfds)">
+        <g fill="none" stroke="#97b6d3" stroke-width="5.4" stroke-opacity="0.42" stroke-linecap="round" stroke-linejoin="round">${arms}</g>
+        <g fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">${arms}${core}</g>
       </g>
-      <g fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
-        ${arms}
-        ${core}
-      </g>
-    </svg>`;
+    </svg>
+  `);
 }
+
+const SNOWFLAKE_URIS = {
+  dendrite: buildSnowflakeUri('dendrite'),
+  plate: buildSnowflakeUri('plate')
+};
+
+const SNOW_PELLET_URI = svgToDataUri(`
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="-8 -8 24 24">
+    <defs>
+      <radialGradient id="pg" cx="35%" cy="35%" r="65%">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="55%" stop-color="#ffffff"/>
+        <stop offset="90%" stop-color="#e8f1fa"/>
+        <stop offset="100%" stop-color="#91b8da" stop-opacity="0.78"/>
+      </radialGradient>
+      <filter id="pds" x="-80%" y="-80%" width="260%" height="260%">
+        <feDropShadow dx="0" dy="1" stdDeviation="1.6" flood-color="#527ca6" flood-opacity="0.52"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="#ffffff" flood-opacity="0.85"/>
+      </filter>
+    </defs>
+    <circle cx="4" cy="4" r="4" fill="url(#pg)" stroke="#84aace" stroke-opacity="0.35" stroke-width="0.6" filter="url(#pds)"/>
+  </svg>
+`);
 
 // =========================================================================
 // 3. 主題註冊表（BG_THEMES）
@@ -420,8 +511,8 @@ export const BG_THEMES = {
     sky: 'linear-gradient(180deg, #8dc5d8 0%, #b8dddc 42%, #dbeef0 75%, #f4f8f7 100%)',
     css: `
       @keyframes cloudFloatLeftToRight {
-        0% { transform: translateX(-240px); }
-        100% { transform: translateX(450px); }
+        0% { transform: translate3d(-240px, 0, 0); }
+        100% { transform: translate3d(450px, 0, 0); }
       }
     `,
     thumbSvg: `
@@ -436,7 +527,7 @@ export const BG_THEMES = {
         <path d="M 10 28 C 6 28 4 24 6 20 C 5 15 11 11 16 12 C 20 6 28 8 30 14 C 35 15 36 21 33 25 C 31 28 27 28 25 28 Z" fill="#ffffff" opacity="0.95"/>
       </svg>`,
     mount(scope) {
-      mountCloudDrift(scope, { makeCloudSvg: makeMorningCloudSvg });
+      mountCloudDrift(scope, { cloudUri: MORNING_CLOUD_URI, baseW: 320, baseH: 180, pad: 24 });
     }
   },
 
@@ -444,10 +535,23 @@ export const BG_THEMES = {
     sky: 'linear-gradient(180deg, #1d1b46 0%, #3e3268 25%, #76476e 50%, #c4645c 74%, #f2b87e 100%)',
     css: `
       @keyframes sunsetSunPulse {
-        0%, 100% { transform: scale(1); opacity: 0.85; filter: drop-shadow(0 0 25px rgba(255, 180, 100, 0.6)); }
-        50% { transform: scale(1.06); opacity: 0.98; filter: drop-shadow(0 0 35px rgba(255, 140, 60, 0.85)); }
+        0%, 100% { transform: scale(1); opacity: 0.85; }
+        50% { transform: scale(1.06); opacity: 0.98; }
       }
-      .anim-sunset-sun { animation: sunsetSunPulse 6.5s ease-in-out infinite; }
+      @keyframes sunsetSunGlowPulse {
+        0%, 100% { opacity: 0; }
+        50% { opacity: 1; }
+      }
+      .anim-sunset-sun {
+        box-shadow: 0 0 25px rgba(255, 180, 100, 0.6);
+        animation: sunsetSunPulse 6.5s ease-in-out infinite;
+        will-change: transform, opacity;
+      }
+      .anim-sunset-sun-glow {
+        box-shadow: 0 0 35px rgba(255, 140, 60, 0.85);
+        animation: sunsetSunGlowPulse 6.5s ease-in-out infinite;
+        will-change: opacity;
+      }
     `,
     thumbSvg: `
       <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
@@ -463,9 +567,14 @@ export const BG_THEMES = {
       </svg>`,
     mount(scope) {
       mountCloudDrift(scope, {
-        makeCloudSvg: makeSunsetCloudSvg,
+        cloudUri: SUNSET_CLOUD_URI,
+        baseW: 340,
+        baseH: 180,
+        pad: 24,
         backdropHtml: `
-          <div class="anim-sunset-sun absolute top-[22%] left-[45%] w-24 h-24 rounded-full bg-gradient-to-tr from-amber-400 via-orange-300 to-yellow-100 pointer-events-none"></div>
+          <div class="anim-sunset-sun absolute top-[22%] left-[45%] w-24 h-24 rounded-full bg-gradient-to-tr from-amber-400 via-orange-300 to-yellow-100 pointer-events-none">
+            <div class="anim-sunset-sun-glow absolute inset-0 rounded-full pointer-events-none"></div>
+          </div>
           <div class="absolute top-[28%] left-[10%] w-44 h-44 rounded-full bg-orange-400/20 blur-3xl pointer-events-none"></div>
         `
       });
@@ -478,7 +587,7 @@ export const BG_THEMES = {
       @keyframes dynamicStarCycle {
         0% { transform: scale(0.2) rotate(0deg); opacity: 0; }
         20% { transform: scale(1.05) rotate(5deg); opacity: 0.95; }
-        50% { transform: scale(1.25) rotate(10deg); opacity: 1; filter: drop-shadow(0 0 7px white); }
+        50% { transform: scale(1.25) rotate(10deg); opacity: 1; }
         80% { transform: scale(0.85) rotate(5deg); opacity: 0.7; }
         100% { transform: scale(0.2) rotate(0deg); opacity: 0; }
       }
@@ -486,17 +595,18 @@ export const BG_THEMES = {
         position: absolute;
         pointer-events: none;
         animation: dynamicStarCycle ease-in-out forwards;
+        will-change: transform, opacity;
       }
       @keyframes meteorFlyGlide {
-        0% { transform: translate(220px, -244px) rotate(-48deg); opacity: 0; }
+        0% { transform: translate3d(220px, -244px, 0) rotate(-48deg); opacity: 0; }
         4% { opacity: 1; }
-        48% { transform: translate(-420px, 466px) rotate(-48deg); opacity: 0; }
-        100% { transform: translate(-420px, 466px) rotate(-48deg); opacity: 0; }
+        48% { transform: translate3d(-420px, 466px, 0) rotate(-48deg); opacity: 0; }
+        100% { transform: translate3d(-420px, 466px, 0) rotate(-48deg); opacity: 0; }
       }
       .meteor-track {
         position: absolute;
         opacity: 0;
-        transform: translate(220px, -244px) rotate(-48deg);
+        transform: translate3d(220px, -244px, 0) rotate(-48deg);
         animation: meteorFlyGlide var(--meteor-dur, 15s) cubic-bezier(0.15, 0.25, 0.2, 1) infinite var(--meteor-del, 0s) both;
         pointer-events: none;
         will-change: transform, opacity;
@@ -535,8 +645,8 @@ export const BG_THEMES = {
         { top: '14%', right: '68%', length: 85,  isBolide: false, dur: getMeteorDur(7.6),  del: '0.6s' }
       ];
       const renderMeteors = (list) => list.map((m) => `
-        <div class="meteor-track" style="top: ${m.top}; right: ${m.right}; --meteor-dur: ${m.dur}; --meteor-del: ${m.del};">
-          ${makeMeteorSvg({ length: m.length, isBolide: m.isBolide })}
+        <div class="meteor-track" style="top: ${m.top}; right: ${m.right}; width: ${m.length + 24}px; height: 28px; --meteor-dur: ${m.dur}; --meteor-del: ${m.del};">
+          ${makeMeteorImgHtml({ length: m.length, isBolide: m.isBolide })}
         </div>`).join('');
 
       scope.setForeHtml(renderMeteors(foreMeteors));
@@ -554,7 +664,12 @@ export const BG_THEMES = {
         render: (s) => {
           const size = 8 + Math.floor(s.prng() * 7);
           const color = starColors[Math.floor(s.prng() * starColors.length)];
-          return makeMicroCrossStarSvg(size, color);
+          return {
+            src: getStarDataUri(color),
+            size,
+            boxPx: size * 1.5,
+            marginPx: -size * 0.25
+          };
         }
       });
     }
@@ -564,12 +679,12 @@ export const BG_THEMES = {
     sky: 'linear-gradient(180deg, #b8e2d9 0%, #d8f0e8 48%, #eef7f1 100%)',
     css: `
       @keyframes rainPhaseControl {
-        0%, 38.89% { opacity: 0.95; transform: translateY(0); }
-        50% { opacity: 0; transform: translateY(6px); }
-        94.43% { opacity: 0; transform: translateY(6px); }
-        94.44%, 100% { opacity: 0.95; transform: translateY(0); }
+        0%, 38.89% { opacity: 0.95; transform: translate3d(0, 0, 0); }
+        50% { opacity: 0; transform: translate3d(0, 6px, 0); }
+        94.43% { opacity: 0; transform: translate3d(0, 6px, 0); }
+        94.44%, 100% { opacity: 0.95; transform: translate3d(0, 0, 0); }
       }
-      .anim-rain-weather-cycle { animation: rainPhaseControl 18s ease-in-out infinite; }
+      .anim-rain-weather-cycle { animation: rainPhaseControl 18s ease-in-out infinite; will-change: transform, opacity; }
       @keyframes rainbowFadeDeep {
         0%, 44.44% { opacity: 0; }
         45% { opacity: 0.15; }
@@ -603,25 +718,26 @@ export const BG_THEMES = {
         animation:
           rainbowFadeDeep 18s cubic-bezier(0.35, 0, 0.25, 1) infinite,
           rainbowClipDeep 18s cubic-bezier(0.35, 0, 0.25, 1) infinite;
+        will-change: opacity, clip-path;
       }
       @keyframes godRaysShimmer {
         0%, 100% { opacity: 0.65; transform: scale(1); }
         50% { opacity: 0.95; transform: scale(1.02); }
       }
-      .anim-god-rays { animation: godRaysShimmer 7s ease-in-out infinite alternate; pointer-events: none; }
+      .anim-god-rays { animation: godRaysShimmer 7s ease-in-out infinite alternate; pointer-events: none; will-change: transform, opacity; }
       @keyframes bokehDrift {
-        0%, 100% { transform: translateY(0px) scale(0.9); opacity: 0.4; }
-        50% { transform: translateY(-12px) scale(1.15); opacity: 0.9; }
+        0%, 100% { transform: translate3d(0, 0px, 0) scale(0.9); opacity: 0.4; }
+        50% { transform: translate3d(0, -12px, 0) scale(1.15); opacity: 0.9; }
       }
-      .anim-bokeh-drift { animation: bokehDrift var(--b-dur, 6s) ease-in-out infinite alternate var(--b-del, 0s); pointer-events: none; }
+      .anim-bokeh-drift { animation: bokehDrift var(--b-dur, 6s) ease-in-out infinite alternate var(--b-del, 0s); pointer-events: none; will-change: transform, opacity; }
       @keyframes rainLocalGlide {
-        0% { transform: translateX(200px); opacity: 0; }
+        0% { transform: translate3d(200px, 0, 0); opacity: 0; }
         18% { opacity: 0.45; }
         82% { opacity: 0.45; }
-        100% { transform: translateX(-260px); opacity: 0; }
+        100% { transform: translate3d(-260px, 0, 0); opacity: 0; }
       }
       .rain-track { position: absolute; transform: rotate(-74deg); transform-origin: center center; pointer-events: none; }
-      .rain-bar, .rain-bar-fg { width: 44px; height: 2.2px; opacity: 0; border-radius: 9999px; animation: rainLocalGlide 2.2s linear infinite 0s both; }
+      .rain-bar, .rain-bar-fg { width: 44px; height: 2.2px; opacity: 0; border-radius: 9999px; animation: rainLocalGlide 2.2s linear infinite 0s both; will-change: transform, opacity; }
       .rain-bar { background: linear-gradient(to right, rgba(255, 255, 255, 0.75) 0%, rgba(56, 189, 248, 0.48) 45%, rgba(14, 165, 233, 0.22) 80%, transparent 100%); box-shadow: 0 0 3px rgba(56, 189, 248, 0.25); }
       .rain-bar-fg { background: linear-gradient(to right, rgba(255, 255, 255, 0.8) 0%, rgba(56, 189, 248, 0.52) 45%, rgba(14, 165, 233, 0.25) 80%, transparent 100%); box-shadow: 0 0 3px rgba(56, 189, 248, 0.28); }
     `,
@@ -669,12 +785,14 @@ export const BG_THEMES = {
 
       scope.setForeHtml(`
         <div id="rainbow-stage-container" class="rainbow-stage-wrapper pointer-events-none">
-          <div class="anim-rainbow-deep w-full">${makeExactMathRainbowSvg()}</div>
+          <div class="anim-rainbow-deep w-full">
+            <img src="${RAINBOW_URI}" alt="" decoding="async" class="w-full h-auto block pointer-events-none select-none"/>
+          </div>
         </div>
         <div class="anim-rain-weather-cycle absolute inset-0 pointer-events-none">${renderTracks(foreTracks, true)}</div>
       `);
       scope.setBackHtml(`
-        ${makeGodRaysSvg()}
+        <img src="${GOD_RAYS_URI}" alt="" decoding="async" class="anim-god-rays absolute inset-0 w-full h-full pointer-events-none select-none"/>
         ${makeMoistureBokehHtml()}
         <div class="anim-rain-weather-cycle absolute inset-0 pointer-events-none">${renderTracks(backTracks, false)}</div>
         <div class="absolute top-[38%] left-[8%] w-36 h-36 rounded-full bg-white/28 blur-2xl pointer-events-none"></div>
@@ -686,26 +804,27 @@ export const BG_THEMES = {
     sky: 'linear-gradient(180deg, #abd9cf 0%, #cfe6eb 48%, #f3ebf2 100%)',
     css: `
       @keyframes soapBubbleRiseUp {
-        0% { transform: translateY(0); opacity: 0; }
+        0% { transform: translate3d(0, 0, 0); opacity: 0; }
         8% { opacity: 0.95; }
         82% { opacity: 0.95; }
-        94% { opacity: 0; transform: translateY(calc(var(--rise-h, -620px) * 0.95)); }
-        100% { opacity: 0; transform: translateY(var(--rise-h, -620px)); }
+        94% { opacity: 0; transform: translate3d(0, calc(var(--rise-h, -620px) * 0.95), 0); }
+        100% { opacity: 0; transform: translate3d(0, var(--rise-h, -620px), 0); }
       }
       .bubble-riser {
         position: absolute;
         animation: soapBubbleRiseUp var(--dur, 11s) linear infinite var(--del, 0s);
         pointer-events: none;
-        will-change: transform;
+        will-change: transform, opacity;
       }
       @keyframes soapBubbleWobbleInner {
-        0% { transform: translateX(-16px) rotate(-3deg) scaleY(0.97) scaleX(1.03); }
-        50% { transform: translateX(0px) rotate(2deg) scaleY(1.02) scaleX(0.98); }
-        100% { transform: translateX(16px) rotate(-2deg) scaleY(0.96) scaleX(1.04); }
+        0% { transform: translate3d(-16px, 0, 0) rotate(-3deg) scaleY(0.97) scaleX(1.03); }
+        50% { transform: translate3d(0px, 0, 0) rotate(2deg) scaleY(1.02) scaleX(0.98); }
+        100% { transform: translate3d(16px, 0, 0) rotate(-2deg) scaleY(0.96) scaleX(1.04); }
       }
       .bubble-wobbler {
         animation: soapBubbleWobbleInner 4.2s ease-in-out infinite alternate;
         pointer-events: none;
+        will-change: transform;
       }
     `,
     thumbSvg: `
@@ -741,7 +860,9 @@ export const BG_THEMES = {
       ];
       const renderBubbles = (list) => list.map((b) => `
         <div class="bubble-riser anim-soap-bubble" style="left: ${b.left}; bottom: -60px; --dur: ${b.dur}; --del: ${b.del}; --rise-h: ${b.riseH};">
-          <div class="bubble-wobbler">${makeRealSoapBubbleSvg(b.size)}</div>
+          <div class="bubble-wobbler" style="width: ${b.size}px; height: ${b.size}px;">
+            <img src="${SOAP_BUBBLE_URI}" alt="" decoding="async" class="block pointer-events-none select-none" style="width: ${b.size * 2}px; height: ${b.size * 2}px; margin: ${-b.size * 0.5}px; max-width: none;"/>
+          </div>
         </div>`).join('');
 
       scope.setForeHtml(renderBubbles(foreBubbles));
@@ -756,12 +877,13 @@ export const BG_THEMES = {
     sky: 'linear-gradient(180deg, #cfdbe6 0%, #e3ebf2 36%, #f2f6fa 72%, #fbfdfe 100%)',
     css: `
       @keyframes snowMistBreathe {
-        0%, 100% { opacity: 0.65; transform: scale(1); }
-        50% { opacity: 0.92; transform: scale(1.04); }
+        0%, 100% { opacity: 0.65; }
+        50% { opacity: 0.92; }
       }
       .anim-snow-mist {
         animation: snowMistBreathe 9s ease-in-out infinite;
         pointer-events: none;
+        will-change: opacity;
       }
       @keyframes snowDiamondGlint {
         0%, 100% { opacity: 0.12; transform: scale(0.75); }
@@ -774,6 +896,7 @@ export const BG_THEMES = {
         box-shadow: 0 0 6px rgba(148, 182, 214, 0.55);
         animation: snowDiamondGlint var(--g-dur, 4.5s) ease-in-out infinite var(--g-del, 0s);
         pointer-events: none;
+        will-change: transform, opacity;
       }
       @keyframes snowFallDrift {
         0% { transform: translate3d(0, -32px, 0); opacity: 0; }
@@ -782,8 +905,8 @@ export const BG_THEMES = {
         100% { transform: translate3d(-28px, 105vh, 0); opacity: 0; }
       }
       @keyframes snowSwayX {
-        0% { transform: translateX(calc(var(--sway-x, 12px) * -1)); }
-        100% { transform: translateX(var(--sway-x, 12px)); }
+        0% { transform: translate3d(calc(var(--sway-x, 12px) * -1), 0, 0); }
+        100% { transform: translate3d(var(--sway-x, 12px), 0, 0); }
       }
       @keyframes snowSpin {
         0% { transform: rotate(0deg); }
@@ -800,15 +923,12 @@ export const BG_THEMES = {
       .snow-sway-wrap {
         animation: snowSwayX var(--sway-dur, 4.2s) ease-in-out infinite alternate var(--sway-del, 0s);
         pointer-events: none;
+        will-change: transform;
       }
       .snow-spin {
         animation: snowSpin var(--spin-dur, 18s) linear infinite;
         pointer-events: none;
-      }
-      .snow-pellet {
-        border-radius: 9999px;
-        background: radial-gradient(circle at 35% 35%, #ffffff 55%, #e8f1fa 90%, rgba(145, 184, 218, 0.78) 100%);
-        box-shadow: 0 1px 3.5px rgba(82, 124, 166, 0.52), 0 0 0 0.6px rgba(132, 170, 206, 0.35), 0 0 5px rgba(255, 255, 255, 0.9);
+        will-change: transform;
       }
     `,
     thumbSvg: `
@@ -833,7 +953,7 @@ export const BG_THEMES = {
         <circle cx="33" cy="20" r="1.2" fill="#ffffff" opacity="0.9"/>
       </svg>`,
     mount(scope) {
-      // 1. 白雪飄飄（細雪粉）：24 顆，1:2 前後景景深分層（後景 16 顆、前景 8 顆）
+      // 1. 白雪飄飄（細雪粉）：24 顆共用單一預編譯 GPU 貼圖，1:2 前後景景深分層
       const backPellets = [
         { left: '5%',  size: 4,   dur: '14.5s', del: '-2.1s',  swayX: '10px', swayDur: '4.6s', op: 0.78 },
         { left: '11%', size: 5,   dur: '12.5s', del: '-7.4s',  swayX: '14px', swayDur: '3.9s', op: 0.85 },
@@ -863,7 +983,7 @@ export const BG_THEMES = {
         { left: '89%', size: 6.5, dur: '9.0s',  del: '-8.7s', swayX: '16px', swayDur: '3.7s', op: 0.94 }
       ];
 
-      // 2. 雪花飄落（六角冰晶 SVG）：12 朵，1:2 前後景景深分層（後景 8 朵、前景 4 朵）
+      // 2. 雪花飄落（六角冰晶）：12 朵共用 2 張預編譯 GPU 貼圖，1:2 前後景景深分層
       const backFlakes = [
         { left: '9%',  size: 12, variant: 'dendrite', dur: '16.5s', del: '-3.2s',  swayX: '14px', spinDur: '20s', op: 0.86 },
         { left: '21%', size: 15, variant: 'plate',    dur: '14.5s', del: '-10.4s', swayX: '16px', spinDur: '24s', op: 0.90 },
@@ -891,16 +1011,16 @@ export const BG_THEMES = {
 
       const renderPellets = (list) => list.map((p) => `
         <div class="snow-fall-wrap" style="left: ${p.left}; --fall-dur: ${p.dur}; --fall-del: ${p.del}; --snow-op: ${p.op};">
-          <div class="snow-sway-wrap" style="--sway-x: ${p.swayX}; --sway-dur: ${p.swayDur}; --sway-del: ${p.del};">
-            <div class="snow-pellet" style="width: ${p.size}px; height: ${p.size}px;"></div>
+          <div class="snow-sway-wrap" style="width: ${p.size}px; height: ${p.size}px; --sway-x: ${p.swayX}; --sway-dur: ${p.swayDur}; --sway-del: ${p.del};">
+            <img src="${SNOW_PELLET_URI}" alt="" decoding="async" class="block pointer-events-none select-none" style="width: ${p.size * 3}px; height: ${p.size * 3}px; margin: ${-p.size}px; max-width: none;"/>
           </div>
         </div>`).join('');
 
       const renderFlakes = (list) => list.map((f) => `
         <div class="snow-fall-wrap" style="left: ${f.left}; --fall-dur: ${f.dur}; --fall-del: ${f.del}; --snow-op: ${f.op};">
           <div class="snow-sway-wrap" style="--sway-x: ${f.swayX}; --sway-dur: 4.4s; --sway-del: ${f.del};">
-            <div class="snow-spin" style="--spin-dur: ${f.spinDur};">
-              ${makeSnowflakeSvg(f.variant, f.size)}
+            <div class="snow-spin" style="width: ${f.size}px; height: ${f.size}px; --spin-dur: ${f.spinDur};">
+              <img src="${SNOWFLAKE_URIS[f.variant]}" alt="" decoding="async" class="block pointer-events-none select-none" style="width: ${(f.size * 1.5).toFixed(1)}px; height: ${(f.size * 1.5).toFixed(1)}px; margin: ${(-f.size * 0.25).toFixed(1)}px; max-width: none;"/>
             </div>
           </div>
         </div>`).join('');

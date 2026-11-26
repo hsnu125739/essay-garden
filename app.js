@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261126c';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126c';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126c';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126c';
-import { bgManager } from './bg-manager.js?v=20261126c';
+} from './engine.js?v=20261126d';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126d';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126d';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126d';
+import { bgManager } from './bg-manager.js?v=20261126d';
 
-const ASSET_VER = '20261126c';
+const ASSET_VER = '20261126d';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [

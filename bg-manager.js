@@ -2,15 +2,20 @@
 // 職責：圖層契約、CSS 單次注入、SVG <defs> ID 作用域隔離、StageScope 生命週期回收、Store 單向訂閱
 // 主題實作定義於 bg-themes.js；新增背景時無須修改本檔。
 
-import { BG_THEMES } from './bg-themes.js?v=20261126c';
+import { BG_THEMES } from './bg-themes.js?v=20261126d';
 
 const BG_STYLE_ID = 'essay-garden-dynamic-bg-styles';
 const DEFAULT_THEME_ID = 'morning';
 
 // 共用圖層層疊契約：後景在小島(z-10)之下，前景在小島(z-10)之上且低於隨筆與懸浮導覽 UI
+// 加上 contain 隔離排版／重繪範圍，並於瀏覽器分頁切至背景不可見時自動暫停動畫
 const BASE_LAYER_CSS = `
-  #dynamic-bg-layer { z-index: 0 !important; pointer-events: none !important; }
-  #dynamic-fg-layer { z-index: 25 !important; pointer-events: none !important; }
+  #dynamic-bg-layer { z-index: 0 !important; pointer-events: none !important; contain: layout style paint; }
+  #dynamic-fg-layer { z-index: 25 !important; pointer-events: none !important; contain: layout style paint; }
+  #app-container[data-bg-paused="true"] #dynamic-bg-layer *,
+  #app-container[data-bg-paused="true"] #dynamic-fg-layer * {
+    animation-play-state: paused !important;
+  }
 `;
 
 // =========================================================================
@@ -39,26 +44,29 @@ function nextUid(prefix = 'bg') {
   return `${prefix}_${++uidSeq}`;
 }
 
+const SVG_BLOCK_RE = /<svg\b[\s\S]*?<\/svg>/g;
+const SVG_ID_DECL_RE = /\bid="([^"]+)"/g;
+const SVG_ID_REF_RE = /\bid="([^"]+)"|url\(#([^)]+)\)|(xlink:)?href="#([^"]+)"/g;
+
 /**
- * 僅重寫 <svg>...</svg> 內部定義的 id 與對應 url(#...) / href="#..."，
+ * 單趟重寫 <svg>...</svg> 內部定義的 id 與對應 url(#...) / href="#..."，
  * 避免多處同時渲染縮圖或動態元件時發生 <defs> ID 碰撞，同時保留外層 HTML 節點 ID。
  */
 function scopeSvgIds(html, prefix = 's') {
   if (!html || !html.includes('<svg')) return html;
-  return html.replace(/<svg\b[\s\S]*?<\/svg>/g, (svg) => {
+  return html.replace(SVG_BLOCK_RE, (svg) => {
     const ids = new Set();
-    svg.replace(/\bid="([^"]+)"/g, (_, id) => { ids.add(id); return ''; });
+    let m;
+    SVG_ID_DECL_RE.lastIndex = 0;
+    while ((m = SVG_ID_DECL_RE.exec(svg)) !== null) ids.add(m[1]);
     if (ids.size === 0) return svg;
     const p = `${prefix}${++uidSeq}_`;
-    let out = svg;
-    for (const id of ids) {
-      const esc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      out = out
-        .replace(new RegExp(`\\bid="${esc}"`, 'g'), `id="${p}${id}"`)
-        .replace(new RegExp(`url\\(#${esc}\\)`, 'g'), `url(#${p}${id})`)
-        .replace(new RegExp(`(xlink:)?href="#${esc}"`, 'g'), `$1href="#${p}${id}"`);
-    }
-    return out;
+    return svg.replace(SVG_ID_REF_RE, (full, declId, urlId, xlinkPrefix, hrefId) => {
+      if (declId && ids.has(declId)) return `id="${p}${declId}"`;
+      if (urlId && ids.has(urlId)) return `url(#${p}${urlId})`;
+      if (hrefId && ids.has(hrefId)) return `${xlinkPrefix || ''}href="#${p}${hrefId}"`;
+      return full;
+    });
   });
 }
 
@@ -75,6 +83,7 @@ export class DOMAdapter {
     this._stage = null;
     this._back = null;
     this._fore = null;
+    this._visBound = false;
   }
 
   init() {
@@ -82,6 +91,16 @@ export class DOMAdapter {
       this._stage = document.getElementById(this.stageId);
       this._back = document.getElementById(this.backLayerId);
       this._fore = document.getElementById(this.foreLayerId);
+      if (!this._visBound) {
+        this._visBound = true;
+        const syncVis = () => {
+          if (!this._stage) return;
+          if (document.hidden) this._stage.dataset.bgPaused = 'true';
+          else delete this._stage.dataset.bgPaused;
+        };
+        document.addEventListener('visibilitychange', syncVis);
+        syncVis();
+      }
     }
   }
 
