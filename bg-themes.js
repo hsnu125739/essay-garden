@@ -385,6 +385,30 @@ function makeRealSoapBubbleSvg(size = 54) {
     </svg>`;
 }
 
+function makeSnowflakeSvg(variant = 'dendrite', size = 18) {
+  const angles = [0, 60, 120, 180, 240, 300];
+  const arm = variant === 'plate'
+    ? `<line x1="50" y1="50" x2="50" y2="12"/><path d="M 44 19 L 50 14 L 56 19"/><line x1="45" y1="29" x2="55" y2="29"/>`
+    : `<line x1="50" y1="50" x2="50" y2="9"/><path d="M 41 21 L 50 14 L 59 21"/><path d="M 38 33 L 50 25 L 62 33"/><circle cx="50" cy="9" r="2.2" fill="#ffffff" stroke="none"/>`;
+  const arms = angles.map((a) => `<g transform="rotate(${a} 50 50)">${arm}</g>`).join('');
+  const core = variant === 'plate'
+    ? `<polygon points="50,37 61,43.5 61,56.5 50,63 39,56.5 39,43.5" fill="#dcebf7" fill-opacity="0.52" stroke="#ffffff" stroke-width="2.6"/>
+       <polygon points="50,44 55,47 55,53 50,56 45,53 45,47" fill="#ffffff" stroke="none"/>`
+    : `<polygon points="50,42 57,46 57,54 50,58 43,54 43,46" fill="#dcebf7" fill-opacity="0.72" stroke="#ffffff" stroke-width="2.2"/>
+       <circle cx="50" cy="50" r="2.8" fill="#9ec0de" stroke="none"/>`;
+
+  return `
+    <svg viewBox="0 0 100 100" width="${size}" height="${size}" class="overflow-visible" style="pointer-events: none; filter: drop-shadow(0 1px 3px rgba(78, 118, 158, 0.55));">
+      <g fill="none" stroke="#97b6d3" stroke-width="5.4" stroke-opacity="0.42" stroke-linecap="round" stroke-linejoin="round">
+        ${arms}
+      </g>
+      <g fill="none" stroke="#ffffff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round">
+        ${arms}
+        ${core}
+      </g>
+    </svg>`;
+}
+
 // =========================================================================
 // 3. 主題註冊表（BG_THEMES）
 // =========================================================================
@@ -724,6 +748,178 @@ export const BG_THEMES = {
       scope.setBackHtml(`
         ${renderBubbles(backBubbles)}
         <div class="absolute top-[32%] right-[12%] w-32 h-32 rounded-full bg-pink-100/30 blur-2xl pointer-events-none"></div>
+      `);
+    }
+  },
+
+  snow: {
+    sky: 'linear-gradient(180deg, #cfdbe6 0%, #e3ebf2 36%, #f2f6fa 72%, #fbfdfe 100%)',
+    css: `
+      @keyframes snowMistBreathe {
+        0%, 100% { opacity: 0.65; transform: scale(1); }
+        50% { opacity: 0.92; transform: scale(1.04); }
+      }
+      .anim-snow-mist {
+        animation: snowMistBreathe 9s ease-in-out infinite;
+        pointer-events: none;
+      }
+      @keyframes snowDiamondGlint {
+        0%, 100% { opacity: 0.12; transform: scale(0.75); }
+        50% { opacity: 0.85; transform: scale(1.15); }
+      }
+      .snow-glint {
+        position: absolute;
+        border-radius: 9999px;
+        background: radial-gradient(circle, #ffffff 0%, #dbeafe 55%, transparent 100%);
+        box-shadow: 0 0 6px rgba(148, 182, 214, 0.55);
+        animation: snowDiamondGlint var(--g-dur, 4.5s) ease-in-out infinite var(--g-del, 0s);
+        pointer-events: none;
+      }
+      @keyframes snowFallDrift {
+        0% { transform: translate3d(0, -32px, 0); opacity: 0; }
+        8% { opacity: var(--snow-op, 0.92); }
+        88% { opacity: var(--snow-op, 0.92); }
+        100% { transform: translate3d(-28px, 105vh, 0); opacity: 0; }
+      }
+      @keyframes snowSwayX {
+        0% { transform: translateX(calc(var(--sway-x, 12px) * -1)); }
+        100% { transform: translateX(var(--sway-x, 12px)); }
+      }
+      @keyframes snowSpin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      .snow-fall-wrap {
+        position: absolute;
+        top: 0;
+        opacity: 0;
+        animation: snowFallDrift var(--fall-dur, 12s) linear infinite var(--fall-del, 0s) both;
+        pointer-events: none;
+        will-change: transform, opacity;
+      }
+      .snow-sway-wrap {
+        animation: snowSwayX var(--sway-dur, 4.2s) ease-in-out infinite alternate var(--sway-del, 0s);
+        pointer-events: none;
+      }
+      .snow-spin {
+        animation: snowSpin var(--spin-dur, 18s) linear infinite;
+        pointer-events: none;
+      }
+      .snow-pellet {
+        border-radius: 9999px;
+        background: radial-gradient(circle at 35% 35%, #ffffff 55%, #e8f1fa 90%, rgba(145, 184, 218, 0.78) 100%);
+        box-shadow: 0 1px 3.5px rgba(82, 124, 166, 0.52), 0 0 0 0.6px rgba(132, 170, 206, 0.35), 0 0 5px rgba(255, 255, 255, 0.9);
+      }
+    `,
+    thumbSvg: `
+      <svg viewBox="0 0 40 40" class="w-full h-full rounded-lg overflow-hidden">
+        <defs>
+          <linearGradient id="tGradSnow" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#c2d4e4"/><stop offset="55%" stop-color="#e4edf5"/><stop offset="100%" stop-color="#f6f9fc"/>
+          </linearGradient>
+        </defs>
+        <rect width="40" height="40" fill="url(#tGradSnow)"/>
+        <g transform="translate(0.8 1)" stroke="#94b3cf" stroke-width="1.6" stroke-linecap="round" fill="none" opacity="0.65">
+          <line x1="17" y1="9" x2="17" y2="31"/><line x1="7.5" y1="14.5" x2="26.5" y2="25.5"/><line x1="26.5" y1="14.5" x2="7.5" y2="25.5"/>
+        </g>
+        <g stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" fill="none">
+          <line x1="17" y1="9" x2="17" y2="31"/><line x1="7.5" y1="14.5" x2="26.5" y2="25.5"/><line x1="26.5" y1="14.5" x2="7.5" y2="25.5"/>
+          <path d="M 14.5 12.5 L 17 10.5 L 19.5 12.5"/><path d="M 14.5 27.5 L 17 29.5 L 19.5 27.5"/>
+          <circle cx="17" cy="20" r="2.2" fill="#dcebf7"/>
+        </g>
+        <circle cx="31" cy="11" r="2.1" fill="#ffffff" stroke="#a6c0d8" stroke-width="0.6"/>
+        <circle cx="29" cy="28" r="1.7" fill="#ffffff" stroke="#a6c0d8" stroke-width="0.6"/>
+        <circle cx="9" cy="10" r="1.4" fill="#ffffff" stroke="#a6c0d8" stroke-width="0.5"/>
+        <circle cx="33" cy="20" r="1.2" fill="#ffffff" opacity="0.9"/>
+      </svg>`,
+    mount(scope) {
+      // 1. 白雪飄飄（細雪粉）：24 顆，1:2 前後景景深分層（後景 16 顆、前景 8 顆）
+      const backPellets = [
+        { left: '5%',  size: 4,   dur: '14.5s', del: '-2.1s',  swayX: '10px', swayDur: '4.6s', op: 0.78 },
+        { left: '11%', size: 5,   dur: '12.5s', del: '-7.4s',  swayX: '14px', swayDur: '3.9s', op: 0.85 },
+        { left: '17%', size: 3.5, dur: '16.0s', del: '-11.2s', swayX: '9px',  swayDur: '5.0s', op: 0.72 },
+        { left: '23%', size: 4.5, dur: '13.5s', del: '-4.8s',  swayX: '12px', swayDur: '4.2s', op: 0.82 },
+        { left: '29%', size: 5,   dur: '11.8s', del: '-9.3s',  swayX: '15px', swayDur: '3.7s', op: 0.86 },
+        { left: '35%', size: 4,   dur: '15.2s', del: '-1.4s',  swayX: '10px', swayDur: '4.8s', op: 0.76 },
+        { left: '42%', size: 3.5, dur: '16.5s', del: '-6.0s',  swayX: '8px',  swayDur: '5.1s', op: 0.70 },
+        { left: '49%', size: 5.5, dur: '12.2s', del: '-10.5s', swayX: '14px', swayDur: '4.0s', op: 0.88 },
+        { left: '55%', size: 4,   dur: '14.8s', del: '-3.6s',  swayX: '11px', swayDur: '4.5s', op: 0.78 },
+        { left: '61%', size: 5,   dur: '13.0s', del: '-8.2s',  swayX: '13px', swayDur: '4.1s', op: 0.84 },
+        { left: '68%', size: 3.5, dur: '15.8s', del: '-0.9s',  swayX: '9px',  swayDur: '4.9s', op: 0.74 },
+        { left: '74%', size: 4.5, dur: '12.8s', del: '-5.5s',  swayX: '12px', swayDur: '3.8s', op: 0.82 },
+        { left: '80%', size: 5,   dur: '14.0s', del: '-12.1s', swayX: '14px', swayDur: '4.3s', op: 0.85 },
+        { left: '86%', size: 4,   dur: '15.4s', del: '-4.0s',  swayX: '10px', swayDur: '4.7s', op: 0.76 },
+        { left: '92%', size: 4.5, dur: '13.2s', del: '-9.8s',  swayX: '13px', swayDur: '4.0s', op: 0.83 },
+        { left: '97%', size: 3.5, dur: '16.2s', del: '-2.7s',  swayX: '9px',  swayDur: '5.2s', op: 0.72 }
+      ];
+      const forePellets = [
+        { left: '14%', size: 6,   dur: '9.2s',  del: '-1.8s', swayX: '16px', swayDur: '3.6s', op: 0.94 },
+        { left: '28%', size: 7,   dur: '8.4s',  del: '-5.1s', swayX: '18px', swayDur: '3.4s', op: 0.96 },
+        { left: '39%', size: 5.5, dur: '10.2s', del: '-7.9s', swayX: '14px', swayDur: '4.0s', op: 0.90 },
+        { left: '47%', size: 7.5, dur: '7.8s',  del: '-3.3s', swayX: '19px', swayDur: '3.2s', op: 0.96 },
+        { left: '58%', size: 6,   dur: '9.6s',  del: '-6.4s', swayX: '15px', swayDur: '3.8s', op: 0.92 },
+        { left: '67%', size: 7,   dur: '8.8s',  del: '-0.6s', swayX: '17px', swayDur: '3.5s', op: 0.95 },
+        { left: '78%', size: 5.5, dur: '10.5s', del: '-4.5s', swayX: '14px', swayDur: '4.1s', op: 0.90 },
+        { left: '89%', size: 6.5, dur: '9.0s',  del: '-8.7s', swayX: '16px', swayDur: '3.7s', op: 0.94 }
+      ];
+
+      // 2. 雪花飄落（六角冰晶 SVG）：12 朵，1:2 前後景景深分層（後景 8 朵、前景 4 朵）
+      const backFlakes = [
+        { left: '9%',  size: 12, variant: 'dendrite', dur: '16.5s', del: '-3.2s',  swayX: '14px', spinDur: '20s', op: 0.86 },
+        { left: '21%', size: 15, variant: 'plate',    dur: '14.5s', del: '-10.4s', swayX: '16px', spinDur: '24s', op: 0.90 },
+        { left: '33%', size: 11, variant: 'dendrite', dur: '18.5s', del: '-6.1s',  swayX: '12px', spinDur: '19s', op: 0.82 },
+        { left: '45%', size: 14, variant: 'plate',    dur: '15.5s', del: '-13.8s', swayX: '15px', spinDur: '22s', op: 0.88 },
+        { left: '57%', size: 16, variant: 'dendrite', dur: '14.0s', del: '-1.5s',  swayX: '17px', spinDur: '17s', op: 0.92 },
+        { left: '70%', size: 12, variant: 'plate',    dur: '17.5s', del: '-8.7s',  swayX: '13px', spinDur: '23s', op: 0.84 },
+        { left: '82%', size: 15, variant: 'dendrite', dur: '15.0s', del: '-4.9s',  swayX: '16px', spinDur: '18s', op: 0.90 },
+        { left: '93%', size: 13, variant: 'plate',    dur: '16.8s', del: '-11.6s', swayX: '14px', spinDur: '21s', op: 0.86 }
+      ];
+      const foreFlakes = [
+        { left: '19%', size: 19, variant: 'dendrite', dur: '11.2s', del: '-2.4s', swayX: '20px', spinDur: '16s', op: 0.96 },
+        { left: '43%', size: 22, variant: 'plate',    dur: '10.2s', del: '-6.9s', swayX: '22px', spinDur: '20s', op: 0.98 },
+        { left: '64%', size: 17, variant: 'dendrite', dur: '12.4s', del: '-9.1s', swayX: '18px', spinDur: '17s', op: 0.95 },
+        { left: '83%', size: 20, variant: 'plate',    dur: '10.8s', del: '-4.2s', swayX: '21px', spinDur: '19s', op: 0.97 }
+      ];
+
+      const glints = [
+        { top: '13%', left: '22%', size: 7, dur: '4.2s', del: '0.3s' },
+        { top: '18%', left: '73%', size: 6, dur: '5.1s', del: '1.7s' },
+        { top: '26%', left: '48%', size: 8, dur: '4.8s', del: '2.9s' },
+        { top: '34%', left: '15%', size: 6, dur: '5.5s', del: '0.9s' },
+        { top: '31%', left: '84%', size: 7, dur: '4.4s', del: '2.2s' }
+      ];
+
+      const renderPellets = (list) => list.map((p) => `
+        <div class="snow-fall-wrap" style="left: ${p.left}; --fall-dur: ${p.dur}; --fall-del: ${p.del}; --snow-op: ${p.op};">
+          <div class="snow-sway-wrap" style="--sway-x: ${p.swayX}; --sway-dur: ${p.swayDur}; --sway-del: ${p.del};">
+            <div class="snow-pellet" style="width: ${p.size}px; height: ${p.size}px;"></div>
+          </div>
+        </div>`).join('');
+
+      const renderFlakes = (list) => list.map((f) => `
+        <div class="snow-fall-wrap" style="left: ${f.left}; --fall-dur: ${f.dur}; --fall-del: ${f.del}; --snow-op: ${f.op};">
+          <div class="snow-sway-wrap" style="--sway-x: ${f.swayX}; --sway-dur: 4.4s; --sway-del: ${f.del};">
+            <div class="snow-spin" style="--spin-dur: ${f.spinDur};">
+              ${makeSnowflakeSvg(f.variant, f.size)}
+            </div>
+          </div>
+        </div>`).join('');
+
+      const renderGlints = glints.map((g) => `
+        <div class="snow-glint" style="top: ${g.top}; left: ${g.left}; width: ${g.size}px; height: ${g.size}px; --g-dur: ${g.dur}; --g-del: ${g.del};"></div>`
+      ).join('');
+
+      scope.setForeHtml(`
+        ${renderPellets(forePellets)}
+        ${renderFlakes(foreFlakes)}
+      `);
+      scope.setBackHtml(`
+        <div class="anim-snow-mist absolute -top-12 left-1/2 -translate-x-1/2 w-[110%] h-44 rounded-full bg-white/38 blur-3xl pointer-events-none"></div>
+        <div class="anim-snow-mist absolute top-[24%] left-[6%] w-40 h-40 rounded-full bg-[#e8f0f7]/55 blur-2xl pointer-events-none"></div>
+        <div class="anim-snow-mist absolute top-[20%] right-[8%] w-44 h-44 rounded-full bg-white/40 blur-3xl pointer-events-none"></div>
+        ${renderGlints}
+        ${renderPellets(backPellets)}
+        ${renderFlakes(backFlakes)}
       `);
     }
   }

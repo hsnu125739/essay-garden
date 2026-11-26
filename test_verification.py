@@ -329,7 +329,7 @@ try:
           const { BgManager, VirtualAdapter, sampleBoxMullerNormal, nextPrng } = await import(`/bg-manager.js?v=${ver}`);
           const { BG_THEMES } = await import(`/bg-themes.js?v=${ver}`);
           assertEq(Array.isArray(cat.bgThemes), true, 'catalog.json must define bgThemes array');
-          assertEq(cat.bgThemes.length, 5, 'expected 5 bgThemes');
+          assertEq(cat.bgThemes.length, 6, 'expected 6 bgThemes');
           assertEq(Object.keys(BG_THEMES), cat.bgThemes.map(b => b.id), 'BG_THEMES keys must match catalog.json bgThemes');
 
           const mem4 = createMemoryStorage();

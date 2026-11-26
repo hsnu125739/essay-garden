@@ -103,7 +103,8 @@ const CATALOG = {
     { id: 'sunset', name: '黃昏暮霞', cost: 50 },
     { id: 'night', name: '靜謐星河', cost: 60 },
     { id: 'rain', name: '雨後彩虹', cost: 80 },
-    { id: 'bubbles', name: '夢幻泡泡', cost: 80 }
+    { id: 'bubbles', name: '夢幻泡泡', cost: 80 },
+    { id: 'snow', name: '北地雪景', cost: 80 }
   ]
 };
 
