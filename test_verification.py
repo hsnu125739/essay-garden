@@ -24,6 +24,9 @@ app_js = load_text("app.js")
 store_js = load_text("store.js")
 cloud_store_js = load_text("cloud-store.js")
 engine_js = load_text("engine.js")
+bg_manager_js = load_text("bg-manager.js")
+bg_themes_js = load_text("bg-themes.js")
+gas_code_gs = load_text(os.path.join("gas", "Code.gs"))
 index_html = load_text("index.html")
 
 
@@ -51,6 +54,14 @@ for mod in ("engine.js", "store.js", "cloud-store.js", "cloud-client.js", "bg-ma
 assert f"./engine.js?v={ASSET_VER}" in store_js, f"store.js import must use ?v={ASSET_VER}"
 for mod in ("engine.js", "store.js", "cloud-client.js"):
     assert f"./{mod}?v={ASSET_VER}" in cloud_store_js, f"cloud-store.js must import {mod}?v={ASSET_VER}"
+assert f"./bg-themes.js?v={ASSET_VER}" in bg_manager_js, f"bg-manager.js must import bg-themes.js?v={ASSET_VER}"
+
+# 三端背景主題 ID 一致性契約（catalog.json ≡ bg-themes.js ≡ gas/Code.gs）
+cat_bg_ids = [b["id"] for b in cat["bgThemes"]]
+gas_bg_match = re.search(r"bgThemes\s*:\s*\[([\s\S]*?)\]", gas_code_gs)
+assert gas_bg_match, "gas/Code.gs must define CATALOG.bgThemes"
+gas_bg_ids = re.findall(r"id\s*:\s*'([^']+)'", gas_bg_match.group(1))
+assert cat_bg_ids == gas_bg_ids, f"bgThemes ID mismatch: catalog.json={cat_bg_ids} vs gas/Code.gs={gas_bg_ids}"
 
 # 動態背景深模組契約與圖層檢查
 assert 'id="dynamic-bg-layer"' in index_html, "index.html must define #dynamic-bg-layer"
@@ -316,8 +327,10 @@ try:
 
           // (8) bg-manager.js & store.js 深模組與 VirtualAdapter 接縫測試
           const { BgManager, VirtualAdapter, sampleBoxMullerNormal, nextPrng } = await import(`/bg-manager.js?v=${ver}`);
+          const { BG_THEMES } = await import(`/bg-themes.js?v=${ver}`);
           assertEq(Array.isArray(cat.bgThemes), true, 'catalog.json must define bgThemes array');
           assertEq(cat.bgThemes.length, 5, 'expected 5 bgThemes');
+          assertEq(Object.keys(BG_THEMES), cat.bgThemes.map(b => b.id), 'BG_THEMES keys must match catalog.json bgThemes');
 
           const mem4 = createMemoryStorage();
           const store4 = new GardenStore(cfg, cat, mem4);
@@ -363,8 +376,59 @@ try:
           bgTest.setScreen('full_island');
           assertEq(vAdapter.currentScreen, 'full_island', 'VirtualAdapter currentScreen full_island');
 
+          // 驗證縮圖 SVG <defs> ID 作用域隔離（同時渲染商店與切換列絕不碰撞）
+          const extractSvgIds = (list) => {
+            const ids = [];
+            for (const item of list) {
+              for (const m of item.thumbSvg.matchAll(/\\bid="([^"]+)"/g)) ids.push(m[1]);
+            }
+            return ids;
+          };
+          const ids1 = extractSvgIds(bgTest.getThemeCatalog());
+          const ids2 = new Set(extractSvgIds(bgTest.getThemeCatalog()));
+          assertEq(ids1.length > 0, true, 'thumbnails must contain scoped defs ids');
+          assertEq(ids1.some(id => ids2.has(id)), false, 'consecutive getThemeCatalog() calls must not collide SVG defs ids');
+
+          // 驗證 night 主題長駐動畫迴圈無 timer 洩漏（timeouts.size <= 14，destroy 後歸零）
+          vAdapter.flushTimeouts();
+          for (let round = 0; round < 3; round++) {
+            const stars = vAdapter.backNodes.filter(n => n.className === 'dynamic-star-node');
+            for (const s of stars) s.emit('animationend');
+            if (vAdapter.timeouts.size > 14) throw new Error(`night timeouts leaked: ${vAdapter.timeouts.size}`);
+            vAdapter.flushTimeouts();
+          }
+
           bgTest.destroy();
           assertEq(vAdapter.intervals.size, 0, 'VirtualAdapter intervals cleared after destroy');
+          assertEq(vAdapter.timeouts.size, 0, 'VirtualAdapter timeouts cleared after destroy');
+
+          // 驗證零侵入擴充新主題：注入第 6 主題無須改動 BgManager 核心
+          const vExt = new VirtualAdapter();
+          let extCleanupCalled = false;
+          const extBg = new BgManager({
+            adapter: vExt,
+            themes: {
+              ...BG_THEMES,
+              aurora: {
+                sky: 'linear-gradient(180deg, #061326 0%, #193e4c 100%)',
+                css: '.anim-aurora-test { opacity: 0.9; }',
+                thumbSvg: '<svg viewBox="0 0 40 40"><defs><linearGradient id="ag"/></defs><rect fill="url(#ag)"/></svg>',
+                mount(scope) {
+                  scope.setBackHtml('<div class="anim-aurora-test"></div>');
+                  scope.every(1000, () => {});
+                  scope.onCleanup(() => { extCleanupCalled = true; });
+                }
+              }
+            }
+          });
+          extBg.init({ defaultTheme: 'aurora' });
+          assertEq(extBg.getCurrentTheme(), 'aurora', 'custom theme mounted');
+          assertEq(vExt.currentStageClass, 'bg-theme-aurora', 'custom theme stage class applied');
+          assertEq(vExt.injectedCss.includes('.bg-theme-aurora'), true, 'custom theme sky CSS compiled');
+          assertEq(vExt.intervals.size, 1, 'custom theme interval tracked');
+          extBg.destroy();
+          assertEq(vExt.intervals.size, 0, 'custom theme interval cleared on destroy');
+          assertEq(extCleanupCalled, true, 'custom theme onCleanup called on destroy');
 
           // (9) store.js: GardenStore 介面（示範反應增刪、成員顯示名稱、卡片樣式與重設、編輯保留隱私）
           const sMem = createMemoryStorage();
