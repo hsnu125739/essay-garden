@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261127a';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261127a';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261127a';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261127a';
-import { bgManager } from './bg-manager.js?v=20261127a';
+} from './engine.js?v=20261127b';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261127b';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261127b';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261127b';
+import { bgManager } from './bg-manager.js?v=20261127b';
 
-const ASSET_VER = '20261127a';
+const ASSET_VER = '20261127b';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -256,7 +256,7 @@ function icon(name, cls = 'w-4 h-4', style = '') {
     flame: `
       <path d="M12 3C13.5 6.5 18 8.5 18 13.5C18 17.1 15.3 20 12 20C8.7 20 6 17.1 6 13.5C6 10.5 8 8.5 9.5 6.5C9.5 8.5 11 9.5 11 9.5C11 6.5 12 3 12 3Z" fill="#f59e0b" fill-opacity="0.28" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`,
     bolt: `
-      <path d="M13 3L5.5 13.5H12L11 21L18.5 10.5H12L13 3Z" fill="#10b981" fill-opacity="0.25" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`,
+      <path d="M13 3L5.5 13.5H12L11 21L18.5 10.5H12L13 3Z" fill="#38bdf8" fill-opacity="0.32" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>`,
     pouch: `
       <path d="M8 7H16L18.5 11.5C19.6 13.5 19.2 16.2 17.5 18C16.1 19.4 14.1 20 12 20C9.9 20 7.9 19.4 6.5 18C4.8 16.2 4.4 13.5 5.5 11.5L8 7Z" fill="currentColor" fill-opacity="0.2" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
       <path d="M9.5 4L12 7L14.5 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`,
@@ -1734,7 +1734,7 @@ function renderScreen() {
   } else {
     // 渲染全螢幕花園
     document.getElementById('garden-header-title').textContent = viewGarden.name;
-    document.getElementById('garden-header-energy').innerHTML = `${icon('bolt', 'w-3.5 h-3.5')}<span>${user.energy}</span>`;
+    document.getElementById('garden-header-energy').innerHTML = `${icon('bolt', 'w-3.5 h-3.5 text-[#0284c7]')}<span>${user.energy}</span>`;
 
     const limBagCount = Object.values(user.limitedSeeds || {}).reduce((a, b) => a + b, 0);
     const totalBagCount = bagCount + limBagCount;
