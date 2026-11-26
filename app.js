@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261126d';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126d';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126d';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126d';
-import { bgManager } from './bg-manager.js?v=20261126d';
+} from './engine.js?v=20261126e';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126e';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126e';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126e';
+import { bgManager } from './bg-manager.js?v=20261126e';
 
-const ASSET_VER = '20261126d';
+const ASSET_VER = '20261126e';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1367,16 +1367,15 @@ function initStaticIcons() {
   document.getElementById('home-next-month').innerHTML = icon('chevRight', 'w-7 h-7');
   document.getElementById('btn-enter-fullscreen-garden').innerHTML = `${icon('expand', 'w-3 h-3 text-[#2b5e4e]')}<span>佈置</span>`;
 
-  document.getElementById('btn-back-home').innerHTML = `${icon('chevLeft', 'w-4 h-4')}<span>返回首頁</span>`;
+  document.getElementById('btn-back-home').innerHTML = `${icon('chevLeft', 'w-4 h-4')}<span>返回</span>`;
   document.getElementById('btn-essays-back-home').innerHTML = icon('arrowLeft', 'w-4 h-4');
   document.getElementById('essays-prev-month').innerHTML = icon('chevLeft', 'w-4 h-4');
   document.getElementById('essays-next-month').innerHTML = icon('chevRight', 'w-4 h-4');
-  document.getElementById('btn-garden-settings').innerHTML = icon('settings', 'w-4 h-4');
   document.getElementById('full-prev-month').innerHTML = icon('chevLeft', 'w-8 h-8');
   document.getElementById('full-next-month').innerHTML = icon('chevRight', 'w-8 h-8');
 
   document.getElementById('nav-btn-shop').innerHTML = `${icon('shop', 'w-5 h-5 text-[#c87119]')}<span>商店/擴地</span>`;
-  document.getElementById('nav-btn-bag').innerHTML = `${icon('pouch', 'w-5 h-5 text-[#2b5e4e]')}<span>種子袋</span>`;
+  document.getElementById('nav-btn-bag').innerHTML = `<span class="relative inline-flex items-center justify-center">${icon('pouch', 'w-5 h-5 text-[#2b5e4e]')}<span id="nav-bag-badge" class="hidden absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-extrabold leading-4 text-center text-[#fffdf8] shadow-sm"></span></span><span>種子袋</span>`;
   document.getElementById('nav-btn-dex').innerHTML = `${icon('book', 'w-5 h-5 text-[#2b5e4e]')}<span>圖鑑</span>`;
   document.getElementById('nav-btn-album').innerHTML = `${icon('album', 'w-5 h-5 text-[#2b5e4e]')}<span>相簿</span>`;
   document.getElementById('nav-btn-group').innerHTML = `${icon('users', 'w-5 h-5 text-[#2b5e4e]')}<span>團體</span>`;
@@ -1736,7 +1735,19 @@ function renderScreen() {
     // 渲染全螢幕花園
     document.getElementById('garden-header-title').textContent = viewGarden.name;
     document.getElementById('garden-header-energy').innerHTML = `${icon('bolt', 'w-3.5 h-3.5')}<span>${user.energy}</span>`;
-    document.getElementById('garden-header-bag').innerHTML = `${icon('pouch', 'w-3.5 h-3.5')}<span>種子袋 ${bagCount}/${config.seedBagCap}</span>`;
+
+    const limBagCount = Object.values(user.limitedSeeds || {}).reduce((a, b) => a + b, 0);
+    const totalBagCount = bagCount + limBagCount;
+    const bagBadgeEl = document.getElementById('nav-bag-badge');
+    if (bagBadgeEl) {
+      if (totalBagCount > 0) {
+        bagBadgeEl.textContent = String(totalBagCount);
+        bagBadgeEl.classList.remove('hidden', 'bg-[#df8a2b]', 'bg-[#2b5e4e]');
+        bagBadgeEl.classList.add(bagCount >= config.seedBagCap ? 'bg-[#df8a2b]' : 'bg-[#2b5e4e]');
+      } else {
+        bagBadgeEl.classList.add('hidden');
+      }
+    }
 
     const fullPrevBtn = document.getElementById('full-prev-month');
     const fullNextBtn = document.getElementById('full-next-month');
@@ -1749,15 +1760,13 @@ function renderScreen() {
     const fullBadgeEl = document.getElementById('full-region-badge');
     if (fullBadgeEl) {
       fullBadgeEl.textContent = statusBadge;
-      fullBadgeEl.className = `absolute right-0 top-1/2 -translate-y-1/2 text-xs px-2 py-0.5 rounded-full font-semibold ${isArchived ? 'bg-[#2b5e4e]/15 text-[#1d4237]' : 'bg-[#2b5e4e] text-[#fffdf8]'}`;
+      fullBadgeEl.className = `text-xs px-2 py-0.5 rounded-full font-semibold shrink-0 ${isArchived ? 'bg-[#2b5e4e]/15 text-[#1d4237]' : 'bg-[#2b5e4e] text-[#fffdf8]'}`;
     }
     const fullTipEl = document.getElementById('full-region-tip');
     if (fullTipEl) {
       fullTipEl.classList.toggle('hidden', isArchived);
     }
     document.getElementById('full-region-subinfo').innerHTML = `
-      <span class="inline-flex items-center gap-1 shrink-0 whitespace-nowrap">${icon('sparkles', 'w-3.5 h-3.5 text-[#df8a2b]')}美觀度 ${evalData.beauty}</span>
-      <span class="text-[#a89f91] shrink-0">・</span>
       <span class="shrink-0 whitespace-nowrap">${evalData.region.size}×${evalData.region.size} 格</span>
       <span class="text-[#a89f91] shrink-0">・</span>
       <span class="shrink-0 whitespace-nowrap">已長成 ${grownCount} 株 / 成長中 ${growingCount} 株</span>`;

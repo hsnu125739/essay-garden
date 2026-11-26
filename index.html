@@ -275,16 +275,10 @@
     <!-- ==================== 全螢幕花園頁（含左右切換月份箭頭、下方資訊與自製 SVG 導覽列） ==================== -->
     <main id="screen-garden" class="hidden flex-1 flex flex-col justify-between relative">
       <!-- 頂部導覽列（z-30 確保高於前景動態層 z-25，絕不被泡泡或雨絲遮擋） -->
-      <header class="relative z-30 px-4 py-3 bg-[#fffdf8]/85 backdrop-blur border-b border-[#e5dec9] flex items-center justify-between text-xs">
-        <button id="btn-back-home" class="cozy-pill px-3 py-1.5 rounded-xl text-[#382e26] font-semibold flex items-center gap-1"></button>
-        <div class="text-center">
-          <div id="garden-header-title" class="font-extrabold text-sm text-[#1d4237]">我的隨筆花園</div>
-          <div class="flex items-center justify-center gap-3 text-xs text-[#5c5046] mt-0.5">
-            <span id="garden-header-energy" class="font-bold text-[#2b5e4e] inline-flex items-center gap-1"></span>
-            <span id="garden-header-bag" class="font-bold text-[#4a6b5d] inline-flex items-center gap-1"></span>
-          </div>
-        </div>
-        <button data-open-modal="settings" class="cozy-pill p-2 rounded-xl text-[#382e26]" id="btn-garden-settings"></button>
+      <header class="relative z-30 px-4 py-2.5 bg-[#fffdf8]/85 backdrop-blur border-b border-[#e5dec9] flex items-center justify-between gap-2 text-xs">
+        <button id="btn-back-home" class="cozy-pill px-2.5 py-1.5 rounded-xl text-[#382e26] font-semibold flex items-center gap-1 shrink-0"></button>
+        <div id="garden-header-title" class="flex-1 min-w-0 font-extrabold text-sm text-[#1d4237] text-center truncate">我的隨筆花園</div>
+        <button type="button" data-open-modal="shop" id="garden-header-energy" title="持有能量（點擊開啟商店）" aria-label="持有能量，點擊開啟商店" class="cozy-pill px-2.5 py-1.5 rounded-xl font-bold text-[#2b5e4e] inline-flex items-center gap-1 shrink-0 hover:bg-white transition"></button>
       </header>
 
       <!-- 種植／移動模式提示條 -->
@@ -309,9 +303,9 @@
         <!-- 懸浮於底部的月份與區域資訊膠囊（style z-index 35 脫離小島上下文，絕不被雨絲與泡泡遮擋） -->
         <div id="full-floating-info" class="pointer-events-none absolute inset-x-3 bottom-2.5 flex justify-center" style="z-index: 35;">
           <div class="sky-pill rounded-2xl px-3 py-1.5 text-center space-y-0.5 w-auto max-w-full">
-            <div class="relative flex items-center justify-center w-full min-h-[22px]">
+            <div class="flex items-center justify-center gap-1.5 min-h-[22px]">
               <span id="full-region-month-title" class="text-sm font-extrabold text-[#1d4237] text-center">2026-11 ・ 春櫻花圃</span>
-              <span id="full-region-badge" class="absolute right-0 top-1/2 -translate-y-1/2 text-xs px-2 py-0.5 rounded-full font-semibold bg-[#2b5e4e] text-[#fffdf8]">經營中</span>
+              <span id="full-region-badge" class="text-xs px-2 py-0.5 rounded-full font-semibold bg-[#2b5e4e] text-[#fffdf8] shrink-0">經營中</span>
             </div>
             <div id="full-region-subinfo" class="text-xs text-[#5c5046] font-medium flex items-center justify-center gap-1.5 whitespace-nowrap"></div>
             <div id="full-region-tip" class="text-[11px] text-[#628b78]">點選空位可種植或佈置，拖曳與雙指縮放可查看大島嶼</div>
@@ -352,6 +346,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261126d"></script>
+  <script type="module" src="./app.js?v=20261126e"></script>
 </body>
 </html>
