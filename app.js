@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261126b';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126b';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126b';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126b';
-import { bgManager } from './bg-manager.js?v=20261126b';
+} from './engine.js?v=20261126c';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126c';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126c';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126c';
+import { bgManager } from './bg-manager.js?v=20261126c';
 
-const ASSET_VER = '20261126b';
+const ASSET_VER = '20261126c';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1362,7 +1362,6 @@ function createIslandStage({ getScreen, isPlacingMode, onCellClick }) {
 // 3. 主畫面與全螢幕花園渲染
 // ============================================================================
 function initStaticIcons() {
-  document.getElementById('brand-logo-icon').innerHTML = icon('sprout', 'w-4 h-4');
   document.getElementById('btn-home-settings').innerHTML = icon('settings', 'w-4 h-4 text-[#2b5e4e]');
   document.getElementById('home-prev-month').innerHTML = icon('chevLeft', 'w-7 h-7');
   document.getElementById('home-next-month').innerHTML = icon('chevRight', 'w-7 h-7');
@@ -1542,8 +1541,8 @@ function renderScreen() {
     const seedsGiven = gardenDay.seedsGiven || 0;
     const seedsLeft = Math.max(0, config.dailySeedCap - seedsGiven);
     const composerPrompt = seedsLeft > 0
-      ? (isGroup ? `寫給團體隨筆⋯滿 ${config.minWords} 字抽種子` : `寫下今日隨筆⋯滿 ${config.minWords} 字抽種子`)
-      : '種子已滿，再寫仍可轉為能量⋯';
+      ? (isGroup ? '寫團體隨筆⋯' : '寫下今日隨筆⋯')
+      : '種子已滿，再寫轉能量⋯';
     const composerBadgeCls = seedsLeft > 0
       ? 'bg-[#2b5e4e]/10 text-[#1d4237]'
       : 'bg-amber-50 text-[#c87119] border border-amber-200/80';
@@ -1553,11 +1552,13 @@ function renderScreen() {
       <span class="w-8 h-8 rounded-full bg-[#2b5e4e] text-[#fde68a] flex items-center justify-center shrink-0 shadow-sm">
         ${icon('quill', 'w-4 h-4')}
       </span>
-      <span class="flex-1 min-w-0 rounded-full bg-[#f6f0e4] border border-[#e5dec9] px-3 py-1.5 text-xs text-[#786b5e] truncate">
+      <span class="flex-1 min-w-0 text-xs text-[#786b5e] truncate">
         ${composerPrompt}
       </span>
-      <span class="shrink-0 text-xs font-bold px-2.5 py-1 rounded-full ${composerBadgeCls}">
-        ${isGroup ? '團體' : '個人'} ${seedsGiven}/${config.dailySeedCap}
+      <span class="shrink-0 flex items-center gap-1.5 pr-1.5 text-xs font-bold whitespace-nowrap">
+        <span class="px-2 py-0.5 rounded-full ${composerBadgeCls}">${isGroup ? `團體 ${seedsGiven}/${config.dailySeedCap}` : `${seedsGiven}/${config.dailySeedCap}`}</span>
+        <span class="w-px h-3 bg-[#e5dec9]" aria-hidden="true"></span>
+        <span id="home-stat-streak" class="flex items-center gap-0.5 text-[#c87119]" title="連續 ${user.streak.count} 天 (×${mult})">${icon('flame', 'w-3.5 h-3.5')}<span>${user.streak.count}天${mult > 1 ? `×${mult}` : ''}</span></span>
       </span>`;
     composerBtn.onclick = () => openEditorModal();
 
@@ -1598,17 +1599,6 @@ function renderScreen() {
       };
     }
     bindEssayCards(carousel);
-
-    // 頂部精簡狀態膠囊（自製 SVG 圖標）
-    const streakEl = document.getElementById('home-stat-streak');
-    const energyEl = document.getElementById('home-stat-energy');
-    const bagEl = document.getElementById('home-stat-bag');
-    streakEl.innerHTML = `${icon('flame', 'w-3.5 h-3.5')}<span>${user.streak.count}天${mult > 1 ? `×${mult}` : ''}</span>`;
-    streakEl.title = `連續 ${user.streak.count} 天 (×${mult})`;
-    energyEl.innerHTML = `${icon('bolt', 'w-3.5 h-3.5')}<span>${user.energy}</span>`;
-    energyEl.title = `能量 ${user.energy}`;
-    bagEl.innerHTML = `${icon('pouch', 'w-3.5 h-3.5')}<span>${bagCount}/${config.seedBagCap}</span>`;
-    bagEl.title = `種子袋 ${bagCount}/${config.seedBagCap}`;
 
     // 左右月份切換與下方資訊
     const homePrevBtn = document.getElementById('home-prev-month');

@@ -236,27 +236,13 @@
 
     <!-- ==================== 首頁（連續天空場景：上方浮動隨筆，下方延伸至底的 3D 懸浮花園島 + 懸浮資訊膠囊） ==================== -->
     <main id="screen-home" class="relative flex-1 flex flex-col px-4 pt-3 pb-0">
-      <!-- 上半部天空群組：精簡標題與狀態列、單列撰寫欄、天空浮動隨筆輪播（z-30 確保高於前景雲朵 z-25，不遮蔽卡片） -->
+      <!-- 上半部天空群組：單列整合撰寫欄與設定鈕、天空浮動隨筆輪播（z-30 確保高於前景雲朵 z-25，不遮蔽卡片） -->
       <section class="relative z-30 space-y-2.5">
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-2 shrink-0">
-            <div class="w-7 h-7 rounded-xl bg-[#2b5e4e] text-[#fffdf8] flex items-center justify-center shadow-sm" id="brand-logo-icon"></div>
-            <h1 class="text-base font-extrabold text-[#1d4237] tracking-tight leading-tight whitespace-nowrap">隨筆花園</h1>
-          </div>
-          <div class="flex items-center gap-1.5 min-w-0">
-            <div class="sky-pill rounded-full px-2.5 py-1 flex items-center gap-2 text-xs font-bold whitespace-nowrap">
-              <div id="home-stat-streak" class="flex items-center gap-1 text-[#c87119]"></div>
-              <div class="w-px h-3 bg-[#e5dec9]"></div>
-              <div id="home-stat-energy" class="flex items-center gap-1 text-[#2b5e4e]"></div>
-              <div class="w-px h-3 bg-[#e5dec9]"></div>
-              <div id="home-stat-bag" class="flex items-center gap-1 text-[#4a6b5d]"></div>
-            </div>
-            <button type="button" data-open-modal="settings" id="btn-home-settings" title="設定與測試" aria-label="設定與測試" class="sky-pill w-8 h-8 rounded-full text-[#382e26] flex items-center justify-center hover:bg-white transition shrink-0"></button>
-          </div>
+        <div class="flex items-center gap-2">
+          <!-- 單列整合撰寫欄（含今日篇數與連續天數，點擊開啟寫作彈窗） -->
+          <button type="button" id="btn-write-composer" class="flex-1 min-w-0 h-11 sky-card rounded-full px-1.5 flex items-center gap-2 text-left hover:border-[#2b5e4e]/45 active:scale-[0.99] transition"></button>
+          <button type="button" data-open-modal="settings" id="btn-home-settings" title="設定與測試" aria-label="設定與測試" class="sky-pill w-11 h-11 rounded-full text-[#382e26] flex items-center justify-center hover:bg-white transition shrink-0"></button>
         </div>
-
-        <!-- 單列撰寫提示欄（仿 FB 發文列，點擊開啟寫作彈窗） -->
-        <button type="button" id="btn-write-composer" class="w-full sky-card rounded-2xl px-2.5 py-2 flex items-center gap-2 text-left hover:border-[#2b5e4e]/45 active:scale-[0.99] transition"></button>
 
         <!-- 橫向滑動輪播：由新到舊排列浮動隨筆便條（最多 10 則） -->
         <div id="essay-carousel" class="essay-scroll-row relative z-30 flex items-stretch gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 pt-2 pb-6 -mb-4 cursor-grab"></div>
@@ -366,6 +352,6 @@
     </div>
   </div>
 
-  <script type="module" src="./app.js?v=20261126b"></script>
+  <script type="module" src="./app.js?v=20261126c"></script>
 </body>
 </html>
