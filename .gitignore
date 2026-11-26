@@ -15,3 +15,6 @@ Lv2_Lv4_枯萎死亡比較圖/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# 本機開發規則
+AGENTS.md

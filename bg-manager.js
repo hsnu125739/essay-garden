@@ -2,7 +2,7 @@
 // 職責：圖層契約、CSS 單次注入、SVG <defs> ID 作用域隔離、StageScope 生命週期回收、Store 單向訂閱
 // 主題實作定義於 bg-themes.js；新增背景時無須修改本檔。
 
-import { BG_THEMES } from './bg-themes.js?v=20261126a';
+import { BG_THEMES } from './bg-themes.js?v=20261126b';
 
 const BG_STYLE_ID = 'essay-garden-dynamic-bg-styles';
 const DEFAULT_THEME_ID = 'morning';

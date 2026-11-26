@@ -17,7 +17,7 @@ import {
   computePriorityBanner,
   selectCarouselEssays,
   orderEvaluatedRegions
-} from './engine.js?v=20261126a';
+} from './engine.js?v=20261126b';
 
 export const DEMO_ESSAY_ID = 'essay_demo_welcome';
 export const CARD_STYLE_STORAGE_KEY = 'essay_garden_card_style_v1';
