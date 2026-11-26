@@ -5,13 +5,13 @@ import {
   getRarityProbabilities,
   computeNeighborAdjustedScales,
   calcPlantLevel
-} from './engine.js?v=20261126e';
-import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261126e';
-import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261126e';
-import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261126e';
-import { bgManager } from './bg-manager.js?v=20261126e';
+} from './engine.js?v=20261127a';
+import { GardenStore, DEMO_ESSAY_ID } from './store.js?v=20261127a';
+import { CloudGardenStore, CLOUD_STATE_STORAGE_KEY } from './cloud-store.js?v=20261127a';
+import { SESSION_STORAGE_KEY } from './cloud-client.js?v=20261127a';
+import { bgManager } from './bg-manager.js?v=20261127a';
 
-const ASSET_VER = '20261126e';
+const ASSET_VER = '20261127a';
 const TAIL_PULL_THRESHOLD_PX = 52;
 
 const CARD_STYLES = [
@@ -1375,7 +1375,7 @@ function initStaticIcons() {
   document.getElementById('full-next-month').innerHTML = icon('chevRight', 'w-8 h-8');
 
   document.getElementById('nav-btn-shop').innerHTML = `${icon('shop', 'w-5 h-5 text-[#c87119]')}<span>商店/擴地</span>`;
-  document.getElementById('nav-btn-bag').innerHTML = `<span class="relative inline-flex items-center justify-center">${icon('pouch', 'w-5 h-5 text-[#2b5e4e]')}<span id="nav-bag-badge" class="hidden absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[10px] font-extrabold leading-4 text-center text-[#fffdf8] shadow-sm"></span></span><span>種子袋</span>`;
+  document.getElementById('nav-btn-bag').innerHTML = `<span class="relative inline-flex items-center justify-center">${icon('pouch', 'w-5 h-5 text-[#2b5e4e]')}<span id="nav-bag-badge" class="hidden absolute -top-1 -right-2 min-w-[14px] h-[14px] px-[3px] rounded-full text-[9px] font-normal leading-[14px] text-center text-[#fffdf8] shadow-sm"></span></span><span>種子袋</span>`;
   document.getElementById('nav-btn-dex').innerHTML = `${icon('book', 'w-5 h-5 text-[#2b5e4e]')}<span>圖鑑</span>`;
   document.getElementById('nav-btn-album').innerHTML = `${icon('album', 'w-5 h-5 text-[#2b5e4e]')}<span>相簿</span>`;
   document.getElementById('nav-btn-group').innerHTML = `${icon('users', 'w-5 h-5 text-[#2b5e4e]')}<span>團體</span>`;
@@ -1540,8 +1540,8 @@ function renderScreen() {
     const seedsGiven = gardenDay.seedsGiven || 0;
     const seedsLeft = Math.max(0, config.dailySeedCap - seedsGiven);
     const composerPrompt = seedsLeft > 0
-      ? (isGroup ? '寫團體隨筆⋯' : '寫下今日隨筆⋯')
-      : '種子已滿，再寫轉能量⋯';
+      ? '寫下今日隨筆抽種子⋯'
+      : '寫下今日隨筆獲取能量⋯';
     const composerBadgeCls = seedsLeft > 0
       ? 'bg-[#2b5e4e]/10 text-[#1d4237]'
       : 'bg-amber-50 text-[#c87119] border border-amber-200/80';
@@ -1554,8 +1554,8 @@ function renderScreen() {
       <span class="flex-1 min-w-0 text-xs text-[#786b5e] truncate">
         ${composerPrompt}
       </span>
-      <span class="shrink-0 flex items-center gap-1.5 pr-1.5 text-xs font-bold whitespace-nowrap">
-        <span class="px-2 py-0.5 rounded-full ${composerBadgeCls}">${isGroup ? `團體 ${seedsGiven}/${config.dailySeedCap}` : `${seedsGiven}/${config.dailySeedCap}`}</span>
+      <span class="shrink-0 flex items-center gap-1 pr-1 text-xs font-bold whitespace-nowrap">
+        <span class="px-1.5 py-0.5 rounded-full ${composerBadgeCls}">${isGroup ? `團體 ${seedsGiven}/${config.dailySeedCap}` : `${seedsGiven}/${config.dailySeedCap}`}</span>
         <span class="w-px h-3 bg-[#e5dec9]" aria-hidden="true"></span>
         <span id="home-stat-streak" class="flex items-center gap-0.5 text-[#c87119]" title="連續 ${user.streak.count} 天 (×${mult})">${icon('flame', 'w-3.5 h-3.5')}<span>${user.streak.count}天${mult > 1 ? `×${mult}` : ''}</span></span>
       </span>`;

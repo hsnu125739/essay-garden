@@ -11,7 +11,7 @@ import {
   computePriorityBanner,
   selectCarouselEssays,
   orderEvaluatedRegions
-} from './engine.js?v=20261126e';
+} from './engine.js?v=20261127a';
 import {
   createMemoryStorage,
   DEMO_ESSAY_ID,
@@ -21,8 +21,8 @@ import {
   applyDemoEssayReaction,
   readPreferredCardStyle,
   writePreferredCardStyle
-} from './store.js?v=20261126e';
-import { CloudClient } from './cloud-client.js?v=20261126e';
+} from './store.js?v=20261127a';
+import { CloudClient } from './cloud-client.js?v=20261127a';
 
 export { CARD_STYLE_STORAGE_KEY };
 export const CLOUD_STATE_STORAGE_KEY = 'essay_garden_cloud_cache_v1';
